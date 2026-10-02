@@ -1,22 +1,133 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Chess Board</title>
-    <link rel="stylesheet"
-          href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <meta charset="utf-8">
+  <title>Chess Board</title>
+
+  <!-- chessboard.js CSS -->
+  <link rel="stylesheet"
+        href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+
+  <!-- jQuery (chessboard.js dependency) -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+  <!-- chessboard.js -->
+  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+  <!-- chess.js (move legality) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+      background: #f4f4f4;
+    }
+    #board { width: 480px; }
+    #status {
+      margin-top: 16px;
+      font-size: 16px;
+      min-height: 24px;
+    }
+    #fen {
+      margin-top: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #555;
+      word-break: break-all;
+      max-width: 480px;
+      text-align: center;
+    }
+    .unicode-piece {
+      /* make the SVG-text render crisply */
+      image-rendering: auto;
+    }
+  </style>
 </head>
 <body>
-    <div id="board" style="width: 400px"></div>
 
-    <script>
-        var board = Chessboard('board', {
-            draggable: true,
-            position: 'start',
-            dropOffBoard: 'snapback'
-        });
-    </script>
+  <h1>Chess Board</h1>
+  <div id="board"></div>
+  <div id="status">White to move</div>
+  <div id="fen"></div>
+
+  <script>
+    // ---------- 1. Unicode piece map ----------
+    const UNICODE = {
+      wK: '\u2654', wQ: '\u2655', wR: '\u2656',
+      wB: '\u2657', wN: '\u2658', wP: '\u2659',
+      bK: '\u265A', bQ: '\u265B', bR: '\u265C',
+      bB: '\u265D', bN: '\u265E', bP: '\u265F'
+    };
+
+    // chessboard.js expects pieceTheme to return an image URL.
+    // We hand it a data-URI SVG containing the Unicode glyph.
+    function unicodePieceTheme(piece) {
+      const glyph = UNICODE[piece] || '?';
+      // Filled vs outline: white pieces use outline glyphs (♔), black use filled (♚).
+      // Add a thin stroke so white pieces are visible on light squares.
+      const isWhite = piece[0] === 'w';
+      const fill = isWhite ? '#ffffff' : '#111111';
+      const stroke = isWhite ? '#111111' : '#000000';
+
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+          `<text x="50" y="78" font-size="82" text-anchor="middle" ` +
+                `font-family="DejaVu Sans, Arial, sans-serif" ` +
+                `fill="${fill}" stroke="${stroke}" stroke-width="1.5">` +
+            glyph +
+          `</text>` +
+        `</svg>`;
+
+      // btoa handles ASCII; our SVG is ASCII-safe since glyphs are escaped \uXXXX.
+      // But the raw glyph char is non-ASCII, so encode via encodeURIComponent instead.
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    }
+
+    // ---------- 2. Game state ----------
+    const game = new Chess();
+
+    // ---------- 3. Init board ----------
+    const board = Chessboard('board', {
+      draggable: true,
+      position: 'start',
+      pieceTheme: unicodePieceTheme,
+      dropOffBoard: 'snapback',
+      onDrop: onDrop,
+      onSnapEnd: () => board.position(game.fen())
+    });
+
+    // ---------- 4. Move handler ----------
+    function onDrop(source, target) {
+      // Illegal move? snapback.
+      const move = game.move({ from: source, to: target, promotion: 'q' });
+      if (move === null) return 'snapback';
+
+      updateStatus();
+    }
+
+    // ---------- 5. Status + FEN display ----------
+    function updateStatus() {
+      const turn = game.turn() === 'w' ? 'White' : 'Black';
+      let msg = turn + ' to move';
+
+      if (game.in_checkmate()) {
+        msg = 'Checkmate — ' + (game.turn() === 'w' ? 'Black' : 'White') + ' wins';
+      } else if (game.in_draw()) {
+        msg = 'Draw';
+      } else if (game.in_check()) {
+        msg = turn + ' is in check';
+      }
+
+      document.getElementById('status').textContent = msg;
+      document.getElementById('fen').textContent = game.fen();
+    }
+
+    updateStatus();
+  </script>
+
 </body>
 </html>
