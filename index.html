@@ -4,17 +4,10 @@
   <meta charset="utf-8">
   <title>Chess Board</title>
 
-  <!-- chessboard.js CSS -->
   <link rel="stylesheet"
         href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
-
-  <!-- jQuery (chessboard.js dependency) -->
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-
-  <!-- chessboard.js -->
   <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-
-  <!-- chess.js (move legality) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 
   <style>
@@ -26,71 +19,180 @@
       padding: 24px;
       background: #f4f4f4;
     }
-    #board { width: 480px; }
-    #status {
-      margin-top: 16px;
-      font-size: 16px;
-      min-height: 24px;
+
+    .layout {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
     }
-    #fen {
-      margin-top: 8px;
+
+    #board { width: 480px; }
+
+    .side {
+      width: 280px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+    }
+
+    textarea, input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
       font-family: monospace;
       font-size: 12px;
+      padding: 6px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    textarea { height: 110px; resize: vertical; }
+
+    button {
+      font-size: 13px;
+      padding: 6px 10px;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      background: #fafafa;
+      cursor: pointer;
+    }
+    button:hover { background: #eee; }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    .nav {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 10px;
+    }
+    .nav button { min-width: 44px; font-size: 15px; }
+
+    #status {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 15px;
+      min-height: 22px;
+    }
+
+    #fen {
+      margin-top: 6px;
+      font-family: monospace;
+      font-size: 11px;
       color: #555;
       word-break: break-all;
-      max-width: 480px;
       text-align: center;
+      max-width: 480px;
     }
-    .unicode-piece {
-      /* make the SVG-text render crisply */
-      image-rendering: auto;
+
+    /* Move list */
+    #moves {
+      max-height: 260px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 13px;
+      line-height: 1.7;
     }
+    #moves .pair { display: flex; gap: 6px; }
+    #moves .num { color: #999; width: 26px; text-align: right; }
+    #moves .mv {
+      cursor: pointer;
+      padding: 0 4px;
+      border-radius: 3px;
+      min-width: 52px;
+    }
+    #moves .mv:hover { background: #eef; }
+    #moves .mv.current { background: #cde; font-weight: bold; }
   </style>
 </head>
 <body>
 
   <h1>Chess Board</h1>
-  <div id="board"></div>
-  <div id="status">White to move</div>
-  <div id="fen"></div>
+
+  <div class="layout">
+    <div>
+      <div id="board"></div>
+      <div id="status">White to move</div>
+      <div id="fen"></div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h3>PGN</h3>
+        <textarea id="pgnInput"
+          placeholder="Paste PGN here, e.g.
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
+        <div style="margin-top:8px; display:flex; gap:6px;">
+          <button id="loadPgn">Load PGN</button>
+          <button id="loadStart">Reset</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>FEN</h3>
+        <input type="text" id="fenInput"
+               placeholder="Paste a FEN string">
+        <div style="margin-top:8px;">
+          <button id="loadFen">Load FEN</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Moves</h3>
+        <div id="moves"><em style="color:#999">No game loaded</em></div>
+        <div class="nav">
+          <button id="first">⏮</button>
+          <button id="prev">◀</button>
+          <button id="next">▶</button>
+          <button id="last">⏭</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
-    // ---------- 1. Unicode piece map ----------
+    // ---------- Unicode pieces ----------
     const UNICODE = {
-      wK: '\u2654', wQ: '\u2655', wR: '\u2656',
-      wB: '\u2657', wN: '\u2658', wP: '\u2659',
-      bK: '\u265A', bQ: '\u265B', bR: '\u265C',
-      bB: '\u265D', bN: '\u265E', bP: '\u265F'
+      wK:'\u2654', wQ:'\u2655', wR:'\u2656',
+      wB:'\u2657', wN:'\u2658', wP:'\u2659',
+      bK:'\u265A', bQ:'\u265B', bR:'\u265C',
+      bB:'\u265D', bN:'\u265E', bP:'\u265F'
     };
 
-    // chessboard.js expects pieceTheme to return an image URL.
-    // We hand it a data-URI SVG containing the Unicode glyph.
     function unicodePieceTheme(piece) {
       const glyph = UNICODE[piece] || '?';
-      // Filled vs outline: white pieces use outline glyphs (♔), black use filled (♚).
-      // Add a thin stroke so white pieces are visible on light squares.
       const isWhite = piece[0] === 'w';
       const fill = isWhite ? '#ffffff' : '#111111';
       const stroke = isWhite ? '#111111' : '#000000';
-
       const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
           `<text x="50" y="78" font-size="82" text-anchor="middle" ` +
                 `font-family="DejaVu Sans, Arial, sans-serif" ` +
                 `fill="${fill}" stroke="${stroke}" stroke-width="1.5">` +
             glyph +
-          `</text>` +
-        `</svg>`;
-
-      // btoa handles ASCII; our SVG is ASCII-safe since glyphs are escaped \uXXXX.
-      // But the raw glyph char is non-ASCII, so encode via encodeURIComponent instead.
+          `</text></svg>`;
       return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
     }
 
-    // ---------- 2. Game state ----------
-    const game = new Chess();
+    // ---------- State ----------
+    let game = new Chess();       // live position
+    let history = [];             // array of {san, fen} — fen is position AFTER move
+    let cursor = 0;               // how many moves are applied (0 = start pos)
 
-    // ---------- 3. Init board ----------
+    // ---------- Board ----------
     const board = Chessboard('board', {
       draggable: true,
       position: 'start',
@@ -100,20 +202,26 @@
       onSnapEnd: () => board.position(game.fen())
     });
 
-    // ---------- 4. Move handler ----------
     function onDrop(source, target) {
-      // Illegal move? snapback.
       const move = game.move({ from: source, to: target, promotion: 'q' });
       if (move === null) return 'snapback';
 
-      updateStatus();
+      // If we're mid-history, drop the future and append
+      history = history.slice(0, cursor);
+      history.push({ san: move.san, fen: game.fen() });
+      cursor = history.length;
+
+      renderAll();
     }
 
-    // ---------- 5. Status + FEN display ----------
-    function updateStatus() {
+    // ---------- Rendering ----------
+    function renderBoard() {
+      board.position(game.fen(), false);
+    }
+
+    function renderStatus() {
       const turn = game.turn() === 'w' ? 'White' : 'Black';
       let msg = turn + ' to move';
-
       if (game.in_checkmate()) {
         msg = 'Checkmate — ' + (game.turn() === 'w' ? 'Black' : 'White') + ' wins';
       } else if (game.in_draw()) {
@@ -121,12 +229,144 @@
       } else if (game.in_check()) {
         msg = turn + ' is in check';
       }
-
       document.getElementById('status').textContent = msg;
       document.getElementById('fen').textContent = game.fen();
     }
 
-    updateStatus();
+    function renderMoves() {
+      const el = document.getElementById('moves');
+      if (history.length === 0) {
+        el.innerHTML = '<em style="color:#999">No game loaded</em>';
+        return;
+      }
+
+      let html = '';
+      for (let i = 0; i < history.length; i += 2) {
+        const num = (i / 2) + 1;
+        const white = history[i];
+        const black = history[i + 1];
+
+        html += '<div class="pair">';
+        html += `<span class="num">${num}.</span>`;
+
+        const wIdx = i + 1;
+        const wCls = cursor === wIdx ? 'mv current' : 'mv';
+        html += `<span class="${wCls}" data-idx="${wIdx}">${white.san}</span>`;
+
+        if (black) {
+          const bIdx = i + 2;
+          const bCls = cursor === bIdx ? 'mv current' : 'mv';
+          html += `<span class="${bCls}" data-idx="${bIdx}">${black.san}</span>`;
+        }
+        html += '</div>';
+      }
+      el.innerHTML = html;
+
+      // click handlers
+      el.querySelectorAll('.mv').forEach(span => {
+        span.onclick = () => gotoPly(parseInt(span.dataset.idx, 10));
+      });
+    }
+
+    function renderNavButtons() {
+      document.getElementById('first').disabled = cursor === 0;
+      document.getElementById('prev').disabled  = cursor === 0;
+      document.getElementById('next').disabled  = cursor >= history.length;
+      document.getElementById('last').disabled  = cursor >= history.length;
+    }
+
+    function renderAll() {
+      renderBoard();
+      renderStatus();
+      renderMoves();
+      renderNavButtons();
+    }
+
+    // ---------- Navigation ----------
+    // cursor = N means: position after N half-moves have been played.
+    function gotoPly(n) {
+      n = Math.max(0, Math.min(n, history.length));
+
+      // Rebuild position from scratch (cheap; chess.js is fast).
+      game = new Chess();
+      for (let i = 0; i < n; i++) {
+        game.move(history[i].san);
+      }
+      cursor = n;
+      renderAll();
+    }
+
+    document.getElementById('first').onclick = () => gotoPly(0);
+    document.getElementById('prev').onclick  = () => gotoPly(cursor - 1);
+    document.getElementById('next').onclick  = () => gotoPly(cursor + 1);
+    document.getElementById('last').onclick  = () => gotoPly(history.length);
+
+    // Arrow keys too
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+      if (e.key === 'ArrowLeft')  gotoPly(cursor - 1);
+      if (e.key === 'ArrowRight') gotoPly(cursor + 1);
+    });
+
+    // ---------- PGN loading ----------
+    document.getElementById('loadPgn').onclick = () => {
+      const text = document.getElementById('pgnInput').value.trim();
+      if (!text) return;
+
+      const g = new Chess();
+      try {
+        g.load_pgn(text);
+      } catch (err) {
+        alert('Could not parse PGN: ' + err.message);
+        return;
+      }
+
+      // Replay to build our history with FENs.
+      const replay = new Chess();
+      const moves = g.history();
+      const newHistory = [];
+      for (const san of moves) {
+        const m = replay.move(san);
+        if (!m) break;
+        newHistory.push({ san: m.san, fen: replay.fen() });
+      }
+
+      history = newHistory;
+      cursor = history.length;
+      game = replay;
+      renderAll();
+    };
+
+    // ---------- FEN loading ----------
+    document.getElementById('loadFen').onclick = () => {
+      const fen = document.getElementById('fenInput').value.trim();
+      if (!fen) return;
+
+      const g = new Chess();
+      try {
+        g.load(fen);   // throws on invalid FEN
+      } catch (err) {
+        alert('Invalid FEN');
+        return;
+      }
+      game = g;
+      history = [];
+      cursor = 0;
+      renderAll();
+    };
+
+    // ---------- Reset ----------
+    document.getElementById('loadStart').onclick = () => {
+      game = new Chess();
+      history = [];
+      cursor = 0;
+      document.getElementById('pgnInput').value = '';
+      document.getElementById('fenInput').value = '';
+      renderAll();
+    };
+
+    // ---------- Init ----------
+    renderAll();
   </script>
 
 </body>
