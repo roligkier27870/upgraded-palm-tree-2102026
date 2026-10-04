@@ -20,20 +20,10 @@
       background: #f4f4f4;
     }
 
-    .layout {
-      display: flex;
-      gap: 24px;
-      align-items: flex-start;
-    }
-
+    .layout { display: flex; gap: 24px; align-items: flex-start; }
     #board { width: 480px; }
 
-    .side {
-      width: 300px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
+    .side { width: 300px; display: flex; flex-direction: column; gap: 12px; }
 
     .panel {
       background: #fff;
@@ -73,20 +63,10 @@
     button:hover { background: #eee; }
     button:disabled { opacity: 0.4; cursor: default; }
 
-    .nav {
-      display: flex;
-      gap: 6px;
-      justify-content: center;
-      margin-top: 10px;
-    }
+    .nav { display: flex; gap: 6px; justify-content: center; margin-top: 10px; }
     .nav button { min-width: 44px; font-size: 15px; }
 
-    #status {
-      margin-top: 12px;
-      text-align: center;
-      font-size: 15px;
-      min-height: 22px;
-    }
+    #status { margin-top: 12px; text-align: center; font-size: 15px; min-height: 22px; }
 
     #fen {
       margin-top: 6px;
@@ -99,11 +79,11 @@
     }
 
     #moves {
-      max-height: 260px;
+      max-height: 280px;
       overflow-y: auto;
       font-family: monospace;
       font-size: 13px;
-      line-height: 1.8;
+      line-height: 2.1;
     }
     #moves .pair { display: flex; gap: 6px; align-items: center; }
     #moves .num { color: #999; width: 26px; text-align: right; }
@@ -113,13 +93,13 @@
       border-radius: 3px;
       min-width: 52px;
       display: inline-flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 4px;
     }
     #moves .mv:hover { background: #eef; }
     #moves .mv.current { background: #cde; font-weight: bold; }
 
-    /* Classification badge */
+    /* Badge sits at the top of the move text's line box */
     #moves .mv .badge {
       display: inline-block;
       width: 15px;
@@ -128,6 +108,7 @@
       background-repeat: no-repeat;
       background-position: center;
       flex-shrink: 0;
+      margin-top: 2px;   /* nudges up to align with cap height of the SAN */
     }
     .cls-brilliant  { background-image: url('icons/Brilliant.png'); }
     .cls-great      { background-image: url('icons/Great.png'); }
@@ -139,39 +120,15 @@
     .cls-mistake    { background-image: url('icons/Mistake.png'); }
     .cls-blunder    { background-image: url('icons/Blunder.png'); }
 
-    #evalLine {
-      font-size: 22px;
-      font-weight: 600;
-      font-family: monospace;
-      text-align: center;
-      padding: 4px 0;
-    }
-    #bestMove {
-      font-family: monospace;
-      font-size: 13px;
-      text-align: center;
-      color: #555;
-    }
+    #evalLine { font-size: 22px; font-weight: 600; font-family: monospace; text-align: center; padding: 4px 0; }
+    #bestMove { font-family: monospace; font-size: 13px; text-align: center; color: #555; }
     #pvLine {
-      font-family: monospace;
-      font-size: 12px;
-      text-align: center;
-      color: #777;
-      margin-top: 4px;
-      min-height: 14px;
-      word-break: break-word;
+      font-family: monospace; font-size: 12px; text-align: center;
+      color: #777; margin-top: 4px; min-height: 14px; word-break: break-word;
     }
-    #engineStatus {
-      font-size: 11px;
-      color: #999;
-      text-align: center;
-      margin-top: 6px;
-    }
+    #engineStatus { font-size: 11px; color: #999; text-align: center; margin-top: 6px; }
 
-    #analyzeAllBtn {
-      width: 100%;
-      margin-top: 6px;
-    }
+    #analyzeAllBtn { width: 100%; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -210,8 +167,7 @@
 
       <div class="panel">
         <h3>FEN</h3>
-        <input type="text" id="fenInput"
-               placeholder="Paste a FEN string">
+        <input type="text" id="fenInput" placeholder="Paste a FEN string">
         <div style="margin-top:8px;">
           <button id="loadFen">Load FEN</button>
         </div>
@@ -233,8 +189,10 @@
   </div>
 
   <script>
-    // ---------- Constants ----------
     const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+    // Material values for Brilliant detection.
+    const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
     // ---------- Unicode pieces ----------
     const UNICODE = {
@@ -261,7 +219,7 @@
 
     // ---------- State ----------
     let game = new Chess();
-    let history = [];         // { san, fen, uci, cls, cpLoss }
+    let history = [];
     let cursor = 0;
 
     // ---------- Board ----------
@@ -292,9 +250,7 @@
     }
 
     // ---------- Rendering ----------
-    function renderBoard() {
-      board.position(game.fen(), false);
-    }
+    function renderBoard() { board.position(game.fen(), false); }
 
     function renderStatus() {
       const turn = game.turn() === 'w' ? 'White' : 'Black';
@@ -333,12 +289,12 @@
 
         const wIdx = i + 1;
         const wCls = cursor === wIdx ? 'mv current' : 'mv';
-        html += `<span class="${wCls}" data-idx="${wIdx}">${white.san}${badgeFor(white.cls)}</span>`;
+        html += `<span class="${wCls}" data-idx="${wIdx}">${badgeFor(white.cls)}${white.san}</span>`;
 
         if (black) {
           const bIdx = i + 2;
           const bCls = cursor === bIdx ? 'mv current' : 'mv';
-          html += `<span class="${bCls}" data-idx="${bIdx}">${black.san}${badgeFor(black.cls)}</span>`;
+          html += `<span class="${bCls}" data-idx="${bIdx}">${badgeFor(black.cls)}${black.san}</span>`;
         }
         html += '</div>';
       }
@@ -369,11 +325,8 @@
     // ---------- Navigation ----------
     function gotoPly(n) {
       n = Math.max(0, Math.min(n, history.length));
-
       game = new Chess();
-      for (let i = 0; i < n; i++) {
-        game.move(history[i].san);
-      }
+      for (let i = 0; i < n; i++) game.move(history[i].san);
       cursor = n;
       renderAll();
     }
@@ -395,12 +348,8 @@
       if (!text) return;
 
       const g = new Chess();
-      try {
-        g.load_pgn(text);
-      } catch (err) {
-        alert('Could not parse PGN: ' + err.message);
-        return;
-      }
+      try { g.load_pgn(text); }
+      catch (err) { alert('Could not parse PGN: ' + err.message); return; }
 
       const replay = new Chess();
       const moves = g.history({ verbose: true });
@@ -426,49 +375,175 @@
     document.getElementById('loadFen').onclick = () => {
       const fen = document.getElementById('fenInput').value.trim();
       if (!fen) return;
-
       const g = new Chess();
-      try {
-        g.load(fen);
-      } catch (err) {
-        alert('Invalid FEN');
-        return;
-      }
-      game = g;
-      history = [];
-      cursor = 0;
+      try { g.load(fen); } catch (err) { alert('Invalid FEN'); return; }
+      game = g; history = []; cursor = 0;
       renderAll();
     };
 
     // ---------- Reset ----------
     document.getElementById('loadStart').onclick = () => {
-      game = new Chess();
-      history = [];
-      cursor = 0;
+      game = new Chess(); history = []; cursor = 0;
       document.getElementById('pgnInput').value = '';
       document.getElementById('fenInput').value = '';
       document.getElementById('analyzeAllStatus').textContent = '';
       renderAll();
     };
 
-    // ---------- Stockfish ----------
+    // ---------- Stockfish plumbing ----------
     let sf = null;
     let sfReady = false;
-    let sfResolve = null;
-    let lastPvUci = [];
-    let autoTimer = null;
     let analyzingAll = false;
+    let autoTimer = null;
 
+    // Single queue: every request waits for the previous to finish.
+    // Each entry: { fen, depth, resolve }
+    let engineQueue = [];
+    let engineBusy = false;
+
+    // Display state for the panel (only updated by foreground runs).
+    let lastPvUci = [];
+    let panelOwner = null;   // 'auto' | 'manual' | null
+
+    function initStockfish() {
+      document.getElementById('engineStatus').textContent = 'Loading engine…';
+
+      sf = new Worker('stockfish/stockfish-18-lite-single.js');
+
+      sf.onerror = (err) => {
+        document.getElementById('engineStatus').textContent =
+          'Engine failed to load: ' + (err.message || 'unknown');
+      };
+
+      sf.onmessage = (e) => {
+        const msg = e.data;
+        if (msg === null || msg === undefined) return;
+        const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
+
+        for (const raw of text.split('\n')) {
+          const l = raw.trim();
+          if (!l) continue;
+
+          if (l === 'uciok')  { sf.postMessage('isready'); continue; }
+
+          if (l === 'readyok') {
+            sfReady = true;
+            document.getElementById('engineStatus').textContent = 'Engine ready';
+            document.getElementById('analyzeBtn').disabled = false;
+            renderNavButtons();
+            scheduleAutoAnalyze();
+            continue;
+          }
+
+          if (engineBusy) handleEngineLine(l);
+        }
+      };
+
+      sf.postMessage('uci');
+    }
+
+    // Called for every line while a queued job is running.
+    function handleEngineLine(l) {
+      const job = engineQueue[0];
+      if (!job) return;
+
+      // ---------- info lines ----------
+      if (l.startsWith('info') && l.includes(' score ')) {
+        const parts = l.split(' ');
+
+        const si = parts.indexOf('score');
+        if (si !== -1 && parts[si + 1] && parts[si + 2]) {
+          const type = parts[si + 1];
+          const val  = parseInt(parts[si + 2], 10);
+          if (!isNaN(val)) {
+            job.lastScore = (type === 'cp') ? val : job.lastScore;
+            job.lastMate  = (type === 'mate') ? val : job.lastMate;
+            if (type === 'cp')   job.lastMate  = null;
+            if (type === 'mate') job.lastScore = null;
+
+            // Update the engine panel only if this job owns it.
+            if (job.owner === 'auto' || job.owner === 'manual') {
+              document.getElementById('evalLine').textContent =
+                formatScore(type, val, job.fen.split(' ')[1]);
+            }
+          }
+        }
+
+        const pi = parts.indexOf('pv');
+        if (pi !== -1) {
+          job.pvUci = parts.slice(pi + 1)
+            .filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
+
+          if (job.owner === 'auto' || job.owner === 'manual') {
+            lastPvUci = job.pvUci;
+            renderEngineLine(job.fen);
+          }
+        }
+        return;
+      }
+
+      // ---------- bestmove ----------
+      if (l.startsWith('bestmove')) {
+        const move = l.split(' ')[1];
+        job.bestUci = move;
+
+        // Convert score → White-POV centipawns for the caller.
+        const turn = job.fen.split(' ')[1];
+        let cpWhite = null;
+        if (job.lastMate !== null && job.lastMate !== undefined) {
+          const sign = (job.lastMate > 0 ? 1 : -1) * (turn === 'w' ? 1 : -1);
+          cpWhite = sign * (10000 - Math.abs(job.lastMate) * 10);
+        } else if (job.lastScore !== null && job.lastScore !== undefined) {
+          cpWhite = turn === 'w' ? job.lastScore : -job.lastScore;
+        }
+
+        if (job.owner === 'auto' || job.owner === 'manual') {
+          if (!lastPvUci.length && move && move !== '(none)') {
+            lastPvUci = [move];
+            renderEngineLine(job.fen);
+          }
+        }
+
+        engineBusy = false;
+        engineQueue.shift();
+        job.resolve({ bestUci: move, cpWhite, pvUci: job.pvUci || [] });
+
+        pumpEngineQueue();
+        return;
+      }
+    }
+
+    function pumpEngineQueue() {
+      if (engineBusy) return;
+      if (!engineQueue.length) return;
+      const job = engineQueue[0];
+      engineBusy = true;
+      sf.postMessage('position fen ' + job.fen);
+      sf.postMessage('go depth ' + job.depth);
+    }
+
+    // Public: enqueue an evaluation. Resolves when bestmove arrives.
+    // owner: 'auto' | 'manual' | null (null = silent, no panel update)
+    function requestEval(fen, depth, owner = null) {
+      return new Promise((resolve) => {
+        if (!sfReady) { resolve(null); return; }
+        engineQueue.push({
+          fen, depth, owner, resolve,
+          lastScore: null, lastMate: null, pvUci: []
+        });
+        pumpEngineQueue();
+      });
+    }
+
+    // ---------- Engine panel ----------
     function uciLineToSan(startFen, uciMoves) {
       const c = new Chess();
       try { c.load(startFen); } catch (e) { return []; }
-
       const sans = [];
       for (const uci of uciMoves) {
         const from  = uci.slice(0, 2);
         const to    = uci.slice(2, 4);
         const promo = uci.length > 4 ? uci[4] : undefined;
-
         const m = c.move({ from, to, promotion: promo || 'q' });
         if (!m) break;
         sans.push(m.san);
@@ -488,19 +563,17 @@
       return '-M' + Math.abs(whiteMate);
     }
 
-    function renderEngineLine() {
+    function renderEngineLine(fen) {
       if (!lastPvUci.length) {
         document.getElementById('bestMove').textContent = '—';
         document.getElementById('pvLine').textContent = '';
         return;
       }
-      const sans = uciLineToSan(game.fen(), lastPvUci);
+      const sans = uciLineToSan(fen, lastPvUci);
       const best = sans[0] || lastPvUci[0];
       document.getElementById('bestMove').textContent = 'Best: ' + best;
-
       const line = sans.slice(1, 6).join(' ');
-      document.getElementById('pvLine').textContent =
-        line ? 'Line: ' + line : '';
+      document.getElementById('pvLine').textContent = line ? 'Line: ' + line : '';
     }
 
     function scheduleAutoAnalyze() {
@@ -511,163 +584,60 @@
         document.getElementById('evalLine').textContent = '…';
         document.getElementById('bestMove').textContent = '…';
         document.getElementById('pvLine').textContent = '';
-        analyzePosition(12);
-      }, 150);
-    }
-
-    function initStockfish() {
-      document.getElementById('engineStatus').textContent = 'Loading engine…';
-
-      sf = new Worker('stockfish/stockfish-18-lite-single.js');
-
-      sf.onerror = (err) => {
-        document.getElementById('engineStatus').textContent =
-          'Engine failed to load: ' + (err.message || 'unknown');
-      };
-
-      sf.onmessage = (e) => {
-        const msg = e.data;
-        if (msg === null || msg === undefined) return;
-
-        const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
-
-        for (const raw of text.split('\n')) {
-          const l = raw.trim();
-          if (!l) continue;
-
-          if (l === 'uciok') { sf.postMessage('isready'); continue; }
-
-          if (l === 'readyok') {
-            sfReady = true;
-            document.getElementById('engineStatus').textContent = 'Engine ready';
-            document.getElementById('analyzeBtn').disabled = false;
-            renderNavButtons();
-            scheduleAutoAnalyze();
-            continue;
-          }
-
-          if (l.startsWith('info') && l.includes(' score ')) {
-            const parts = l.split(' ');
-
-            const si = parts.indexOf('score');
-            if (si !== -1 && parts[si + 1] && parts[si + 2]) {
-              const type = parts[si + 1];
-              const val  = parseInt(parts[si + 2], 10);
-              if (!isNaN(val)) {
-                document.getElementById('evalLine').textContent =
-                  formatScore(type, val, game.turn());
-              }
-            }
-
-            const pi = parts.indexOf('pv');
-            if (pi !== -1) {
-              lastPvUci = parts.slice(pi + 1)
-                .filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
-              renderEngineLine();
-            }
-            continue;
-          }
-
-          if (l.startsWith('bestmove')) {
-            const move = l.split(' ')[1];
-            if (move && move !== '(none)' && !lastPvUci.length) {
-              lastPvUci = [move];
-              renderEngineLine();
-            }
-            if (sfResolve) { sfResolve(move); sfResolve = null; }
-            continue;
-          }
-        }
-      };
-
-      sf.postMessage('uci');
-    }
-
-    function analyzePosition(depth = 14) {
-      return new Promise((resolve) => {
-        if (!sfReady) { resolve(null); return; }
         lastPvUci = [];
-        sfResolve = resolve;
-        sf.postMessage('position fen ' + game.fen());
-        sf.postMessage('go depth ' + depth);
-      });
+        requestEval(game.fen(), 12, 'auto');
+      }, 150);
     }
 
     document.getElementById('analyzeBtn').onclick = () => {
       document.getElementById('evalLine').textContent = '…';
       document.getElementById('bestMove').textContent = '…';
       document.getElementById('pvLine').textContent = '';
-      analyzePosition(16);
+      lastPvUci = [];
+      requestEval(game.fen(), 16, 'manual');
     };
 
-    // ---------- Position evaluation (for classification) ----------
-    // Runs an isolated eval on a given FEN and resolves with
-    // { bestUci, cpWhite } where cpWhite is centipawns from White's POV,
-    // or a squashed mate score. Restores sf.onmessage afterwards.
-    function evalPosition(fen, depth) {
-      return new Promise((resolve) => {
-        if (!sfReady) { resolve(null); return; }
-
-        let bestMove = null;
-        let lastScore = null;
-        let lastMate  = null;
-
-        const savedOnMessage = sf.onmessage;
-
-        sf.onmessage = (e) => {
-          const msg = e.data;
-          if (msg === null || msg === undefined) return;
-          const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
-
-          for (const raw of text.split('\n')) {
-            const l = raw.trim();
-            if (!l) continue;
-
-            if (l.startsWith('info') && l.includes(' score ')) {
-              const parts = l.split(' ');
-              const si = parts.indexOf('score');
-              if (si !== -1 && parts[si + 1] && parts[si + 2]) {
-                const type = parts[si + 1];
-                const val  = parseInt(parts[si + 2], 10);
-                if (!isNaN(val)) {
-                  if (type === 'cp')   { lastScore = val; lastMate = null; }
-                  if (type === 'mate') { lastMate  = val; lastScore = null; }
-                }
-              }
-            }
-
-            if (l.startsWith('bestmove')) {
-              bestMove = l.split(' ')[1];
-              sf.onmessage = savedOnMessage;
-
-              const turn = fen.split(' ')[1];
-              let cpWhite = null;
-              if (lastMate !== null) {
-                const sign = (lastMate > 0 ? 1 : -1) * (turn === 'w' ? 1 : -1);
-                cpWhite = sign * (10000 - Math.abs(lastMate) * 10);
-              } else if (lastScore !== null) {
-                cpWhite = turn === 'w' ? lastScore : -lastScore;
-              }
-
-              resolve({ bestUci: bestMove, cpWhite });
-              return;
-            }
-          }
-        };
-
-        sf.postMessage('position fen ' + fen);
-        sf.postMessage('go depth ' + depth);
-      });
+    // ---------- Classification ----------
+    function materialCount(fen) {
+      // Returns { w, b } in pawns. Kings ignored.
+      let w = 0, b = 0;
+      const board = fen.split(' ')[0];
+      for (const ch of board) {
+        const lower = ch.toLowerCase();
+        if (PIECE_VALUES[lower] !== undefined && lower !== 'k') {
+          if (ch === ch.toUpperCase()) w += PIECE_VALUES[lower];
+          else                         b += PIECE_VALUES[lower];
+        }
+      }
+      return { w, b };
     }
 
-    // ---------- Classification ----------
-    function classifyLoss(loss) {
-      if (loss <= 10)  return 'best';
-      if (loss <= 30)  return 'excellent';
-      if (loss <= 60)  return 'good';
-      if (loss <= 120) return 'inaccuracy';
-      if (loss <= 250) return 'mistake';
-      return 'blunder';
+    function isTheory(moveIndex, san) {
+      // Very small hardcoded book. Extend this list as you like.
+      // Keyed by half-move index (1-based) and SAN.
+      const BOOK = [
+        ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],   // Ruy Lopez Closed
+        ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],   // Najdorf
+        ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],                // QGD
+        ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],               // Italian
+        ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],                 // KID
+        ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],             // Scotch
+        ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],              // Caro-Kann
+        ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],                // French
+        ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],               // Slav
+        ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],             // Scandi
+        ['c4','e5','Nc3','Nf6','Nf3','Nc6'],                          // English
+        ['Nf3','d5','g3','Nf6','Bg2','e6']                            // Reti
+      ];
+      for (const line of BOOK) {
+        if (moveIndex > line.length) continue;
+        let matches = true;
+        for (let i = 0; i < moveIndex - 1; i++) {
+          if (history[i] && history[i].san !== line[i]) { matches = false; break; }
+        }
+        if (matches && line[moveIndex - 1] === san) return true;
+      }
+      return false;
     }
 
     async function classifyMove(index, depth = 10) {
@@ -677,18 +647,86 @@
       const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
       const fenAfter  = mv.fen;
 
-      const pre  = await evalPosition(fenBefore, depth);
-      if (!pre)  return;
-      const post = await evalPosition(fenAfter, depth);
-      if (!post) return;
+      // 1. Theory check first — it short-circuits everything.
+      if (isTheory(index, mv.san)) {
+        mv.cls = 'theory';
+        mv.cpLoss = 0;
+        return;
+      }
+
+      // 2. Eval before, playing best.
+      const pre = await requestEval(fenBefore, depth, null);
+      if (!pre || pre.cpWhite === null) return;
+
+      // 3. If the played move matches the engine's top choice, it can't
+      //    be worse than "best".
+      const playedMatchesBest =
+        pre.bestUci &&
+        pre.bestUci !== '(none)' &&
+        mv.uci.startsWith(pre.bestUci.slice(0, 4)) &&
+        (mv.uci.length === 4 || mv.uci[4] === pre.bestUci[4]);
+
+      if (playedMatchesBest) {
+        // Evaluate "second best" to decide best vs great vs brilliant.
+        // We approximate with a single follow-up eval.
+        const post = await requestEval(fenAfter, depth, null);
+        if (!post) return;
+
+        const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+        const preCpMover   = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
+        const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
+        const loss = Math.max(0, preCpMover - postCpMover);
+
+        // Material check for Brilliant.
+        const matBefore = materialCount(fenBefore);
+        const matAfter  = materialCount(fenAfter);
+        const moverBefore = moverIsWhite ? matBefore.w : matBefore.b;
+        const moverAfter  = moverIsWhite ? matAfter.w  : matAfter.b;
+        const oppBefore   = moverIsWhite ? matBefore.b : matBefore.w;
+        const oppAfter    = moverIsWhite ? matAfter.b  : matAfter.w;
+
+        const moverLost = moverBefore - moverAfter;
+        const oppLost   = oppBefore - oppAfter;
+        const netSac   = oppLost - moverLost;   // negative = we gave up material
+
+        // Brilliant: best move AND we sacrificed at least a pawn net
+        // AND the eval is still strongly in our favor (>= +1.0).
+        if (netSac <= -1 && preCpMover >= 100) {
+          mv.cpLoss = loss;
+          mv.cls = 'brilliant';
+          return;
+        }
+
+        // Great: it's the best move and the second-best is clearly worse.
+        // We approximate "second best is worse" by checking whether the
+        // follow-up position leaves the eval close to pre (i.e. no
+        // obvious alternative equal to this).
+        // For now, a coarse approximation: if loss is tiny, it's best.
+        mv.cpLoss = loss;
+        mv.cls = loss <= 10 ? 'best' : 'great';
+        return;
+      }
+
+      // 4. Played move wasn't the top pick — compare evals.
+      const post = await requestEval(fenAfter, depth, null);
+      if (!post || post.cpWhite === null) return;
 
       const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-      const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
-      const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
+      const preCpMover   = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
+      const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
       const loss = Math.max(0, preCpMover - postCpMover);
 
       mv.cpLoss = loss;
       mv.cls = classifyLoss(loss);
+    }
+
+    function classifyLoss(loss) {
+      if (loss <= 10)  return 'best';
+      if (loss <= 30)  return 'excellent';
+      if (loss <= 60)  return 'good';
+      if (loss <= 120) return 'inaccuracy';
+      if (loss <= 250) return 'mistake';
+      return 'blunder';
     }
 
     // ---------- Analyze Full Game ----------
@@ -708,7 +746,6 @@
 
         renderMoves();
         renderNavButtons();
-
         await new Promise(r => setTimeout(r, 0));
       }
 
