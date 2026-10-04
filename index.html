@@ -396,20 +396,17 @@
     let sfResolve = null;
 
     function initStockfish() {
-      sf = new Worker('https://cdn.jsdelivr.net/npm/stockfish@18.0.8/src/stockfish-18-lite-single.js');
+      sf = new Worker('https://cdn.jsdelivr.net/npm/stockfish@19.0.0/bin/stockfish-19-lite-single.js');
 
       sf.onerror = (err) => {
         document.getElementById('engineStatus').textContent =
-          'Engine failed to load: ' + err.message;
+          'Engine failed to load: ' + (err.message || 'unknown');
       };
 
       sf.onmessage = (e) => {
         const line = e.data;
 
-        if (line === 'uciok') {
-          sf.postMessage('isready');
-          return;
-        }
+        if (line === 'uciok') { sf.postMessage('isready'); return; }
 
         if (line === 'readyok') {
           sfReady = true;
