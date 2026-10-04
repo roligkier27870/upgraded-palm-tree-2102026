@@ -956,12 +956,12 @@
     let chessAfter, chessBefore;
     try {
       chessAfter  = new Chess(fenAfter);
-      chessBefore = new Chess(fenBefore);   // <-- stays pristine
+      chessBefore = new Chess(fenBefore);
     } catch (e) { return false; }
 
     let playedMove;
     try {
-      const tmp = new Chess(fenBefore);      // <-- separate instance for move reconstruction
+      const tmp = new Chess(fenBefore);
       playedMove = tmp.move({
         from: mv.uci.slice(0, 2),
         to:   mv.uci.slice(2, 4),
@@ -1082,9 +1082,19 @@
   // ============================================================
   // ---------- Brilliant detection -----------------------------
   // ============================================================
+  // Rules:
+  //   1. Must be a real sacrifice (isSacrifice returns true).
+  //   2. Must not be losing after the sac (postCpMover >= 0).
+  //   3. Must not be already crushing before the sac (preCpMover < 500).
+  //   4. Opponent's top replies must not flip the eval.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
+    // Rule 3: already winning big → not brilliant.
+    if (preCpMover >= 500) return false;
+
+    // Rule 1: real sacrifice.
     if (!isSacrifice(index)) return false;
 
+    // Deep eval for the sac.
     const brilliantDepth = Math.max(depth, 16);
     const post = await requestEval(fenAfter, brilliantDepth, null, 2);
     if (!post || post.cpWhite === null) return false;
@@ -1092,18 +1102,10 @@
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
     const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
+    // Rule 2: not losing after.
     if (postCpMover < 0) return false;
 
-    const matBefore = materialCount(fenBefore);
-    const matAfter  = materialCount(fenAfter);
-    const moverLost = (moverIsWhite ? matBefore.w : matBefore.b) -
-                      (moverIsWhite ? matAfter.w  : matAfter.b);
-    const oppLost   = (moverIsWhite ? matBefore.b : matBefore.w) -
-                      (moverIsWhite ? matAfter.b  : matAfter.w);
-    const netSac    = moverLost - oppLost;
-    const slack     = Math.min(300, Math.max(1, Math.abs(netSac)) * 50);
-    if (postCpMover < preCpMover - slack) return false;
-
+    // Rule 4: opponent's replies must not flip the eval.
     if (post.topLines && post.topLines.length > 0) {
       const sign = moverIsWhite ? -1 : 1;
       for (const line of post.topLines) {
@@ -1260,7 +1262,7 @@
   window.classifyMove = classifyMove;
   window.isBrilliant = isBrilliant;
   window.materialCount = materialCount;
-    
+
   }); // end chessjs-ready
 </script>
 
