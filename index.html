@@ -1251,6 +1251,15 @@
   renderAll();
   initStockfish();
 
+  // Expose internals for console debugging.
+  window.game = game;
+  window.history = history;
+  window.isSacrifice = isSacrifice;
+  window.couldBeSaved = couldBeSaved;
+  window.classifyMove = classifyMove;
+  window.isBrilliant = isBrilliant;
+  window.materialCount = materialCount;
+
   }); // end chessjs-ready
 </script>
 
