@@ -224,7 +224,7 @@
     const board = Chessboard('board', {
       draggable: true,
       position: 'start',
-      pieceTheme: 'pieces/{piece}.png',
+      pieceTheme: '{piece}.png',
       dropOffBoard: 'snapback',
       onDrop: onDrop,
       onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); }
