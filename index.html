@@ -1082,15 +1082,16 @@
   // ============================================================
   // ---------- Brilliant detection -----------------------------
   // ============================================================
-  // Rules:
-  //   1. Must be a real sacrifice (isSacrifice returns true).
-  //   2. Must not be losing after the sac (postCpMover >= 0).
-  //   3. Must not be already crushing before the sac (preCpMover < 500).
-  //   4. Opponent's top replies must not flip the eval.
+  // Rules (user's definition):
+  //   1. Must be a real sacrifice. Faux-sacrifices (attacker pinned,
+  //      can't legally capture) are already excluded by chess.js
+  //      1.0.0's attackers() which only returns legal attackers.
+  //   2. Eval after the sac must not be losing for the mover.
+  //   3. Opponent's top replies must not flip the eval.
+  //
+  // No "already winning" gate. A sound sacrifice is a sacrifice,
+  // regardless of whether the position was already favorable.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
-    // Rule 3: already winning big → not brilliant.
-    if (preCpMover >= 500) return false;
-
     // Rule 1: real sacrifice.
     if (!isSacrifice(index)) return false;
 
@@ -1105,7 +1106,7 @@
     // Rule 2: not losing after.
     if (postCpMover < 0) return false;
 
-    // Rule 4: opponent's replies must not flip the eval.
+    // Rule 3: opponent's replies must not flip the eval.
     if (post.topLines && post.topLines.length > 0) {
       const sign = moverIsWhite ? -1 : 1;
       for (const line of post.topLines) {
