@@ -268,6 +268,7 @@
     .cls-inaccuracy { background-image: url('icons/Inaccuracy.png'); }
     .cls-mistake    { background-image: url('icons/Mistake.png'); }
     .cls-blunder    { background-image: url('icons/Blunder.png'); }
+    .cls-forced     { background-image: url('icons/Forced.png'); }
 
     #analyzeAllBtn { width: 100%; margin-top: 10px; }
 
@@ -698,7 +699,6 @@
           .filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
       }
 
-      // Save line for whichever job owns this run.
       if (score !== null || mate !== null) {
         job.lines[pvIdx - 1] = { score, mate, pvUci };
       }
@@ -765,8 +765,6 @@
     sf.postMessage('go depth ' + job.depth);
   }
 
-  // requestEval options: { multiPv } — defaults to 1 for classification jobs,
-  // caller can pass 2 or 3 for panel jobs.
   function requestEval(fen, depth, owner = null, multiPv = 1) {
     return new Promise((resolve) => {
       if (!sfReady) { resolve(null); return; }
@@ -855,7 +853,6 @@
       lastPvUci = [];
       multiPvLines = [];
       renderMultiPv(game.fen());
-      // Panel jobs get MultiPV 3 so the top-3 box fills.
       requestEval(game.fen(), 12, 'auto', 3);
     }, 150);
   }
@@ -914,19 +911,24 @@
     return false;
   }
 
+  // ---------- Forced detection ----------
+  // A move is "Forced" if, in the position before it was played, the mover
+  // had exactly one legal move. No choice = no praise, no blame.
+  function isForced(index) {
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const c = new Chess();
+    try { c.load(fenBefore); } catch (e) { return false; }
+    return c.moves().length === 1;
+  }
+
   // ---------- Brilliant detection ----------
-  // A move is Brilliant if:
-  //   1. It matched the engine's #1 move in the position BEFORE it was played.
-  //   2. It gave up material (mover net-lost >= 1 pawn vs opponent).
-  //   3. After the move, the eval is still >= 0 from the mover's POV.
-  //   4. The opponent's best TWO replies (MultiPV 2 from the position AFTER
-  //      the move) both leave the eval >= 0 for the mover.
-  //
-  // Step 4 is the "sacrifice holds against best defense" check — it's what
-  // separates a real Brilliant from a desperate lunge.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
     const mv = history[index - 1];
     if (!mv) return false;
+
+    // Fast path: the position before the move was already a forced mate
+    // for the mover. Any sac toward mate counts.
+    if (preCpMover >= 9000) return true;
 
     // Sacrifice check: did the mover net-lose material this move?
     const matBefore = materialCount(fenBefore);
@@ -940,30 +942,26 @@
 
     const moverLost = moverBefore - moverAfter;
     const oppLost   = oppBefore - oppAfter;
-    const netSac    = moverLost - oppLost;   // positive = we gave up material
+    const netSac    = moverLost - oppLost;
 
-    if (netSac < 1) return false;              // need at least 1 pawn net sac
-    if (preCpMover < 0) return false;          // were already losing before
+    if (netSac < 1) return false;
 
-    // MultiPV 2 from the position AFTER the move. This asks:
-    // "against the opponent's two best replies, does the sac hold?"
+    // MultiPV 2 from the position after the move.
     const post = await requestEval(fenAfter, depth, null, 2);
     if (!post || !post.topLines || post.topLines.length === 0) return false;
 
-    const turn = fenAfter.split(' ')[1];       // opponent to move
-    const sign = moverIsWhite ? -1 : 1;         // convert opponent POV → mover
-
-    for (const line of post.topLines.slice(0, 2)) {
+    const sign = moverIsWhite ? -1 : 1;
+    for (const line of post.topLines) {
       let cpForOpponent;
       if (line.mate !== null && line.mate !== undefined) {
-        cpForOpponent = (line.mate > 0 ? 1 : -1) * (10000 - Math.abs(line.mate) * 10);
+        cpForOpponent = (line.mate > 0 ? 1 : -1) *
+                        (10000 - Math.abs(line.mate) * 10);
       } else if (line.score !== null && line.score !== undefined) {
         cpForOpponent = line.score;
       } else {
         continue;
       }
-      const cpForMover = sign * cpForOpponent;
-      if (cpForMover < 0) return false;        // best defense wins for opponent
+      if (sign * cpForOpponent < 0) return false;
     }
     return true;
   }
@@ -976,6 +974,15 @@
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
 
+    // 1. Forced? Only one legal move — no credit, no blame.
+    if (isForced(index)) {
+      mv.cls = 'forced';
+      mv.cpLoss = 0;
+      mv.winDrop = 0;
+      return;
+    }
+
+    // 2. Opening theory?
     if (isTheory(index, mv.san)) {
       mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0;
       return;
@@ -1004,23 +1011,23 @@
     mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
     mv.winDrop = winDrop;
 
-    // Dead-won / dead-lost exemption
-    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
-    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
-    if (bothWinning || bothLosing) {
-      mv.cls = winDrop <= 0.005 ? 'best' : 'good';
-      return;
-    }
-
-    // ---- Brilliant check ----
-    // Only try the expensive check if the played move was the best one.
+    // ---- Brilliant check FIRST (before the dead-won short-circuit) ----
     if (playedMatchesBest) {
       const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
       if (brilliant) {
         mv.cls = 'brilliant';
         return;
       }
+      // Not brilliant. Fall through to best/great.
       mv.cls = winDrop <= 0.005 ? 'best' : 'great';
+      return;
+    }
+
+    // ---- Dead-won / dead-lost exemption for non-best moves ----
+    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
+    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
+    if (bothWinning || bothLosing) {
+      mv.cls = winDrop <= 0.005 ? 'best' : 'good';
       return;
     }
 
