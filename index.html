@@ -920,19 +920,22 @@
   }
 
   // ---------- Brilliant detection ----------
-  // A move is Brilliant if:
-  //   1. It was the engine's top choice in the position before it was played.
-  //   2. It gave up material (net sac >= 1 pawn).
-  //   3. After the move, the mover is still winning or equal.
-  //   4. The eval drop is within a slack that scales with the sac size
-  //      (a queen sac can afford a bigger temporary dip than a pawn sac).
-  //   5. Against the opponent's top TWO replies, the mover is not losing.
-  // The check runs at deeper depth (>= 16) so mating nets get seen.
+  // Gates, in order:
+  //   A. Not already crushing before the move (pre-eval < +7.0).
+  //   B. Real material sac this move (net >= 1 pawn).
+  //   C. Deep eval (>= depth 16), MultiPV 2.
+  //   D. After the sac, mover is clearly better (>= +1.0).
+  //   E. Eval drop within slack: 50cp per pawn sac'd, cap 300.
+  //   F. Both of opponent's top replies leave mover at >= +0.5.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
     const mv = history[index - 1];
     if (!mv) return false;
 
-    // 1. Material sac check.
+    // Gate A — already crushing? Then a sac is showing off, not brilliant.
+    // (Credit: Gemini's suggestion.)
+    if (preCpMover >= 700) return false;
+
+    // Gate B — real material sac.
     const matBefore = materialCount(fenBefore);
     const matAfter  = materialCount(fenAfter);
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
@@ -948,21 +951,21 @@
 
     if (netSac < 1) return false;
 
-    // 2. Deeper eval than classification depth — brilliancy needs vision.
+    // Gate C — deep eval, MultiPV 2.
     const brilliantDepth = Math.max(depth, 16);
     const post = await requestEval(fenAfter, brilliantDepth, null, 2);
     if (!post || post.cpWhite === null) return false;
 
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
-    // 3. Still must be winning or equal after the sac.
-    if (postCpMover < 0) return false;
+    // Gate D — sac must leave the mover clearly better, not just equal.
+    if (postCpMover < 100) return false;
 
-    // 4. Eval drop allowed scales with sac size: 50cp per pawn sac'd, cap 300.
+    // Gate E — slack scales with sac size.
     const slack = Math.min(300, netSac * 50);
     if (postCpMover < preCpMover - slack) return false;
 
-    // 5. MultiPV 2 — opponent's replies must not flip the game.
+    // Gate F — MultiPV 2: both opponent replies must leave mover >= +0.5.
     if (post.topLines && post.topLines.length > 0) {
       const sign = moverIsWhite ? -1 : 1;
       for (const line of post.topLines) {
@@ -975,7 +978,7 @@
         } else {
           continue;
         }
-        if (sign * cpForOpponent < -50) return false;
+        if (sign * cpForOpponent < 50) return false;
       }
     }
     return true;
@@ -989,7 +992,6 @@
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
 
-    // 1. Forced?
     if (isForced(index)) {
       mv.cls = 'forced';
       mv.cpLoss = 0;
@@ -997,7 +999,6 @@
       return;
     }
 
-    // 2. Theory?
     if (isTheory(index, mv.san)) {
       mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0;
       return;
@@ -1026,7 +1027,6 @@
     mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
     mv.winDrop = winDrop;
 
-    // ---- Brilliant check FIRST (before the dead-won short-circuit) ----
     if (playedMatchesBest) {
       const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
       if (brilliant) {
@@ -1037,7 +1037,6 @@
       return;
     }
 
-    // ---- Dead-won / dead-lost exemption for non-best moves ----
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
     if (bothWinning || bothLosing) {
@@ -1064,7 +1063,7 @@
 
     analyzingAll = true;
     document.getElementById('analyzeAllBtn').disabled = true;
-    const depth = 14;   // bumped from 10 — tactically deeper for brilliancies
+    const depth = 14;
 
     for (let i = 1; i <= history.length; i++) {
       document.getElementById('analyzeAllStatus').textContent =
