@@ -29,7 +29,7 @@
     #board { width: 480px; }
 
     .side {
-      width: 280px;
+      width: 300px;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -103,18 +103,41 @@
       overflow-y: auto;
       font-family: monospace;
       font-size: 13px;
-      line-height: 1.7;
+      line-height: 1.8;
     }
-    #moves .pair { display: flex; gap: 6px; }
+    #moves .pair { display: flex; gap: 6px; align-items: center; }
     #moves .num { color: #999; width: 26px; text-align: right; }
     #moves .mv {
       cursor: pointer;
       padding: 0 4px;
       border-radius: 3px;
       min-width: 52px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
     #moves .mv:hover { background: #eef; }
     #moves .mv.current { background: #cde; font-weight: bold; }
+
+    /* Classification badge */
+    #moves .mv .badge {
+      display: inline-block;
+      width: 15px;
+      height: 15px;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      flex-shrink: 0;
+    }
+    .cls-brilliant  { background-image: url('icons/Brilliant.png'); }
+    .cls-great      { background-image: url('icons/Great.png'); }
+    .cls-best       { background-image: url('icons/Best.png'); }
+    .cls-excellent  { background-image: url('icons/Excellent.png'); }
+    .cls-good       { background-image: url('icons/Good.png'); }
+    .cls-theory     { background-image: url('icons/Theory.png'); }
+    .cls-inaccuracy { background-image: url('icons/Inaccuracy.png'); }
+    .cls-mistake    { background-image: url('icons/Mistake.png'); }
+    .cls-blunder    { background-image: url('icons/Blunder.png'); }
 
     #evalLine {
       font-size: 22px;
@@ -142,6 +165,11 @@
       font-size: 11px;
       color: #999;
       text-align: center;
+      margin-top: 6px;
+    }
+
+    #analyzeAllBtn {
+      width: 100%;
       margin-top: 6px;
     }
   </style>
@@ -198,11 +226,16 @@
           <button id="next">▶</button>
           <button id="last">⏭</button>
         </div>
+        <button id="analyzeAllBtn" disabled>Analyze Full Game</button>
+        <div id="analyzeAllStatus" style="font-size:11px; color:#999; text-align:center; margin-top:4px;"></div>
       </div>
     </div>
   </div>
 
   <script>
+    // ---------- Constants ----------
+    const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
     // ---------- Unicode pieces ----------
     const UNICODE = {
       wK:'\u2654', wQ:'\u2655', wR:'\u2656',
@@ -228,7 +261,7 @@
 
     // ---------- State ----------
     let game = new Chess();
-    let history = [];
+    let history = [];         // { san, fen, uci, cls, cpLoss }
     let cursor = 0;
 
     // ---------- Board ----------
@@ -246,7 +279,13 @@
       if (move === null) return 'snapback';
 
       history = history.slice(0, cursor);
-      history.push({ san: move.san, fen: game.fen() });
+      history.push({
+        san: move.san,
+        fen: game.fen(),
+        uci: move.from + move.to + (move.promotion || ''),
+        cls: null,
+        cpLoss: null
+      });
       cursor = history.length;
 
       renderAll();
@@ -271,6 +310,11 @@
       document.getElementById('fen').textContent = game.fen();
     }
 
+    function badgeFor(cls) {
+      if (!cls) return '';
+      return `<span class="badge cls-${cls}" title="${cls}"></span>`;
+    }
+
     function renderMoves() {
       const el = document.getElementById('moves');
       if (history.length === 0) {
@@ -289,12 +333,12 @@
 
         const wIdx = i + 1;
         const wCls = cursor === wIdx ? 'mv current' : 'mv';
-        html += `<span class="${wCls}" data-idx="${wIdx}">${white.san}</span>`;
+        html += `<span class="${wCls}" data-idx="${wIdx}">${white.san}${badgeFor(white.cls)}</span>`;
 
         if (black) {
           const bIdx = i + 2;
           const bCls = cursor === bIdx ? 'mv current' : 'mv';
-          html += `<span class="${bCls}" data-idx="${bIdx}">${black.san}</span>`;
+          html += `<span class="${bCls}" data-idx="${bIdx}">${black.san}${badgeFor(black.cls)}</span>`;
         }
         html += '</div>';
       }
@@ -310,6 +354,8 @@
       document.getElementById('prev').disabled  = cursor === 0;
       document.getElementById('next').disabled  = cursor >= history.length;
       document.getElementById('last').disabled  = cursor >= history.length;
+      document.getElementById('analyzeAllBtn').disabled =
+        !sfReady || history.length === 0 || analyzingAll;
     }
 
     function renderAll() {
@@ -357,12 +403,17 @@
       }
 
       const replay = new Chess();
-      const moves = g.history();
+      const moves = g.history({ verbose: true });
       const newHistory = [];
-      for (const san of moves) {
-        const m = replay.move(san);
-        if (!m) break;
-        newHistory.push({ san: m.san, fen: replay.fen() });
+      for (const m of moves) {
+        replay.move(m.san);
+        newHistory.push({
+          san: m.san,
+          fen: replay.fen(),
+          uci: m.from + m.to + (m.promotion || ''),
+          cls: null,
+          cpLoss: null
+        });
       }
 
       history = newHistory;
@@ -396,6 +447,7 @@
       cursor = 0;
       document.getElementById('pgnInput').value = '';
       document.getElementById('fenInput').value = '';
+      document.getElementById('analyzeAllStatus').textContent = '';
       renderAll();
     };
 
@@ -405,8 +457,8 @@
     let sfResolve = null;
     let lastPvUci = [];
     let autoTimer = null;
+    let analyzingAll = false;
 
-    // Convert a list of UCI moves into SAN, starting from a given position.
     function uciLineToSan(startFen, uciMoves) {
       const c = new Chess();
       try { c.load(startFen); } catch (e) { return []; }
@@ -451,9 +503,8 @@
         line ? 'Line: ' + line : '';
     }
 
-    // Debounced auto-analyze. Cancels any pending run if you spam nav.
     function scheduleAutoAnalyze() {
-      if (!sfReady) return;
+      if (!sfReady || analyzingAll) return;
       if (autoTimer) clearTimeout(autoTimer);
       autoTimer = setTimeout(() => {
         autoTimer = null;
@@ -490,7 +541,7 @@
             sfReady = true;
             document.getElementById('engineStatus').textContent = 'Engine ready';
             document.getElementById('analyzeBtn').disabled = false;
-            // First evaluation once the engine is up.
+            renderNavButtons();
             scheduleAutoAnalyze();
             continue;
           }
@@ -547,6 +598,124 @@
       document.getElementById('bestMove').textContent = '…';
       document.getElementById('pvLine').textContent = '';
       analyzePosition(16);
+    };
+
+    // ---------- Position evaluation (for classification) ----------
+    // Runs an isolated eval on a given FEN and resolves with
+    // { bestUci, cpWhite } where cpWhite is centipawns from White's POV,
+    // or a squashed mate score. Restores sf.onmessage afterwards.
+    function evalPosition(fen, depth) {
+      return new Promise((resolve) => {
+        if (!sfReady) { resolve(null); return; }
+
+        let bestMove = null;
+        let lastScore = null;
+        let lastMate  = null;
+
+        const savedOnMessage = sf.onmessage;
+
+        sf.onmessage = (e) => {
+          const msg = e.data;
+          if (msg === null || msg === undefined) return;
+          const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
+
+          for (const raw of text.split('\n')) {
+            const l = raw.trim();
+            if (!l) continue;
+
+            if (l.startsWith('info') && l.includes(' score ')) {
+              const parts = l.split(' ');
+              const si = parts.indexOf('score');
+              if (si !== -1 && parts[si + 1] && parts[si + 2]) {
+                const type = parts[si + 1];
+                const val  = parseInt(parts[si + 2], 10);
+                if (!isNaN(val)) {
+                  if (type === 'cp')   { lastScore = val; lastMate = null; }
+                  if (type === 'mate') { lastMate  = val; lastScore = null; }
+                }
+              }
+            }
+
+            if (l.startsWith('bestmove')) {
+              bestMove = l.split(' ')[1];
+              sf.onmessage = savedOnMessage;
+
+              const turn = fen.split(' ')[1];
+              let cpWhite = null;
+              if (lastMate !== null) {
+                const sign = (lastMate > 0 ? 1 : -1) * (turn === 'w' ? 1 : -1);
+                cpWhite = sign * (10000 - Math.abs(lastMate) * 10);
+              } else if (lastScore !== null) {
+                cpWhite = turn === 'w' ? lastScore : -lastScore;
+              }
+
+              resolve({ bestUci: bestMove, cpWhite });
+              return;
+            }
+          }
+        };
+
+        sf.postMessage('position fen ' + fen);
+        sf.postMessage('go depth ' + depth);
+      });
+    }
+
+    // ---------- Classification ----------
+    function classifyLoss(loss) {
+      if (loss <= 10)  return 'best';
+      if (loss <= 30)  return 'excellent';
+      if (loss <= 60)  return 'good';
+      if (loss <= 120) return 'inaccuracy';
+      if (loss <= 250) return 'mistake';
+      return 'blunder';
+    }
+
+    async function classifyMove(index, depth = 10) {
+      const mv = history[index - 1];
+      if (!mv) return;
+
+      const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+      const fenAfter  = mv.fen;
+
+      const pre  = await evalPosition(fenBefore, depth);
+      if (!pre)  return;
+      const post = await evalPosition(fenAfter, depth);
+      if (!post) return;
+
+      const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+      const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
+      const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
+      const loss = Math.max(0, preCpMover - postCpMover);
+
+      mv.cpLoss = loss;
+      mv.cls = classifyLoss(loss);
+    }
+
+    // ---------- Analyze Full Game ----------
+    document.getElementById('analyzeAllBtn').onclick = async () => {
+      if (analyzingAll || !sfReady || history.length === 0) return;
+
+      analyzingAll = true;
+      document.getElementById('analyzeAllBtn').disabled = true;
+
+      const depth = 10;
+
+      for (let i = 1; i <= history.length; i++) {
+        document.getElementById('analyzeAllStatus').textContent =
+          `Analyzing move ${i} / ${history.length}…`;
+
+        await classifyMove(i, depth);
+
+        renderMoves();
+        renderNavButtons();
+
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      analyzingAll = false;
+      document.getElementById('analyzeAllBtn').disabled = false;
+      document.getElementById('analyzeAllStatus').textContent = 'Done.';
+      renderMoves();
     };
 
     // ---------- Init ----------
