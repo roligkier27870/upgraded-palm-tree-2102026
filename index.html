@@ -98,7 +98,6 @@
       max-width: 480px;
     }
 
-    /* Move list */
     #moves {
       max-height: 260px;
       overflow-y: auto;
@@ -117,7 +116,6 @@
     #moves .mv:hover { background: #eef; }
     #moves .mv.current { background: #cde; font-weight: bold; }
 
-    /* Engine panel */
     #evalLine {
       font-size: 22px;
       font-weight: 600;
@@ -398,23 +396,11 @@
     function initStockfish() {
       document.getElementById('engineStatus').textContent = 'Loading engine…';
 
-      // Use the lite single-threaded build. This is the ~1.6MB WASM
-      // engine that works on GitHub Pages without COOP/COEP headers.
-      const cdnUrl = 'https://cdn.jsdelivr.net/npm/stockfish@19.0.0/stockfish-19-lite-single.js';
-
-      // The trick: create a same-origin Blob worker whose only job is to
-      // importScripts() the real engine from the CDN. Browsers reject
-      // new Worker(crossOriginUrl) unconditionally, but they accept a
-      // same-origin Blob URL. The import inside the Blob fetches the
-      // real script via CORS (jsDelivr sends Access-Control-Allow-Origin: *).
-      const blob = new Blob(
-        [`importScripts("${cdnUrl}");`],
-        { type: 'application/javascript' }
-      );
-      const blobUrl = URL.createObjectURL(blob);
-
-      sf = new Worker(blobUrl);
-      URL.revokeObjectURL(blobUrl);
+      // Same-origin path — no CORS, no Blob, no CDN.
+      // Expects these files in the stockfish/ folder of your repo:
+      //   stockfish/stockfish-18-lite-single.js
+      //   stockfish/stockfish-18-lite-single.wasm
+      sf = new Worker('stockfish/stockfish-18-lite-single.js');
 
       sf.onerror = (err) => {
         document.getElementById('engineStatus').textContent =
