@@ -434,14 +434,8 @@
     if (!mv || !mv.cls) return;
 
     const dest = mv.uci.slice(2, 4);
-    let fileIdx = dest.charCodeAt(0) - 'a'.charCodeAt(0);
-    let rankIdx = 8 - parseInt(dest[1], 10);
-
-    // FIX: Account for board orientation (if flipped to black)
-    if (typeof board !== 'undefined' && board.orientation() === 'black') {
-      fileIdx = 7 - fileIdx;
-      rankIdx = 7 - rankIdx;
-    }
+    const fileIdx = dest.charCodeAt(0) - 'a'.charCodeAt(0);
+    const rankIdx = 8 - parseInt(dest[1], 10);
 
     const size = overlay.parentElement.clientWidth;
     const sq = size / 8;
@@ -877,7 +871,7 @@
     return 1 / (1 + Math.exp(-0.00368208 * cp));
   }
 
-  // ---------- Material count (still used for eval-slack) ----------
+  // ---------- Material count ----------
   function materialCount(fen) {
     let w = 0, b = 0;
     for (const ch of fen.split(' ')[0]) {
@@ -926,7 +920,7 @@
   }
 
   // ============================================================
-  // ---------- Sacrifice detection (ported from Chesskit) ------
+  // ---------- Sacrifice detection -----------------------------
   // ============================================================
   function makeChess(fen) {
     const c = new Chess();
@@ -996,6 +990,12 @@
     return false;
   }
 
+  // Return true if the move at `index` was a material sacrifice.
+  // Adapted from Brilliant Chess / Chesskit, with two fixes:
+  //   * Case 0: the piece that just moved is hanging on its new square.
+  //   * Case 1: the "captured" exclusion was removed — a piece that just
+  //     captured can still be a sacrifice (Bxe5: bishop takes knight, then
+  //     lands on a square where it's attacked and undefended).
   function isSacrifice(index) {
     const mv = history[index - 1];
     if (!mv) return false;
@@ -1028,17 +1028,44 @@
         const { attackers, defenders } =
           getAttackersDefenders(chessAfter, moverColor, sq.square);
 
-        // FIX: Removed strict pawn/null capture restriction so active piece captures (like Bxe5) can be recognized
-        if (defenders.length === 0 && attackers.length > 0) {
-          sacrificing.push(sq.square);
-          continue;
+        // ----- Case 0: the piece that just moved is now hanging. -----
+        // This is the key new case. The moved piece is attacked and
+        // undefended on its destination square — a real sacrifice even
+        // if it just captured something.
+        if (playedMove.to === sq.square) {
+          if (attackers.length > 0 && defenders.length === 0) {
+            // Don't count trivial trades: if what we captured is worth
+            // strictly more than what's now hanging, we made money, not a sac.
+            const capturedVal = captured ? PIECE_VALUES[captured] : 0;
+            const pieceVal = PIECE_VALUES[sq.type];
+            if (capturedVal < pieceVal || capturedVal === pieceVal) {
+              sacrificing.push(sq.square);
+              continue;
+            }
+          }
         }
 
-        if ((sq.type === 'n' || sq.type === 'b') && !captured) {
+        // ----- Case 1: undefended and attacked (any piece) -----
+        // Note: the `captured` exclusion was REMOVED. A capture move can
+        // still leave a piece hanging.
+        if (defenders.length === 0 && attackers.length > 0) {
+          const capturedVal = captured ? PIECE_VALUES[captured] : 0;
+          const pieceVal = PIECE_VALUES[sq.type];
+          // Skip if we captured something worth strictly more than this
+          // piece — that's a profitable trade, not a sacrifice.
+          if (capturedVal < pieceVal || capturedVal === pieceVal) {
+            sacrificing.push(sq.square);
+            continue;
+          }
+        }
+
+        // ----- Case 2: knight or bishop attacked by a pawn -----
+        if ((sq.type === 'n' || sq.type === 'b')) {
           const pawnAttacker = attackers.pieces.find(p => p && p.type === 'p');
           if (pawnAttacker) { sacrificing.push(sq.square); continue; }
         }
 
+        // ----- Case 3: rook hanging -----
         if (sq.type === 'r' && attackers.length > 0 &&
             captured !== 'r' && captured !== 'q' &&
             !(attackers.length === 1 &&
@@ -1049,6 +1076,7 @@
           continue;
         }
 
+        // ----- Case 4: queen hanging -----
         if (sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
             !(attackers.length === 1 && attackers.pieces[0]?.type === 'q' && defenders.length > 0) &&
             !(attackers.length === 1 && attackers.pieces[0]?.type === 'r' &&
@@ -1068,6 +1096,7 @@
         beforePiece.type  === afterPiece.type;
 
       const checkSquare = samePieceOnSquare ? sq : playedMove.from;
+
       const oppColor = moverColor === 'w' ? 'b' : 'w';
       if (couldBeSaved(chessBefore, checkSquare, oppColor)) return true;
     }
@@ -1097,7 +1126,7 @@
     const oppLost   = (moverIsWhite ? matBefore.b : matBefore.w) -
                       (moverIsWhite ? matAfter.b  : matAfter.w);
     const netSac    = moverLost - oppLost;
-    const slack     = Math.min(300, Math.max(1, netSac) * 50);
+    const slack     = Math.min(300, Math.max(1, Math.abs(netSac)) * 50);
     if (postCpMover < preCpMover - slack) return false;
 
     if (post.topLines && post.topLines.length > 0) {
@@ -1189,12 +1218,14 @@
     mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
     mv.winDrop = winDrop;
 
+    // Brilliant — any sound sacrifice.
     const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
     if (brilliant) {
       mv.cls = 'brilliant';
       return;
     }
 
+    // Dead-won / dead-lost exemption.
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
     if (bothWinning || bothLosing) {
