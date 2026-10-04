@@ -920,57 +920,103 @@
   }
 
   // ============================================================
-  // ---------- Sacrifice detection -----------------------------
+  // ---------- Sacrifice detection (chess.js 0.10.3 compatible)
   // ============================================================
+  // chess.js 0.10.3 does NOT have `attackers()`. We compute attacker
+  // and defender info by replaying moves with the verbose move list.
+
   function makeChess(fen) {
     const c = new Chess();
     try { c.load(fen); } catch (e) { /* noop */ }
     return c;
   }
 
+  // Given a position and a target square, return the list of `from`
+  // squares whose side is `attackerColor` and that can legally move TO
+  // `targetSquare`. Legal-move filtering handles pins automatically.
+  function getAttackers(chess, targetSquare, attackerColor) {
+    const turn = chess.turn();
+    if (turn !== attackerColor) {
+      // Not that side's move — need to peek. chess.js 0.10.3 can't
+      // easily "generate moves for the other side", so we make a copy
+      // with the turn flipped by inserting the color into the FEN.
+      const fen = chess.fen();
+      const parts = fen.split(' ');
+      parts[1] = attackerColor;
+      // Clear en-passant and halfmove when flipping (safe to be lax here).
+      parts[3] = '-';
+      const flipped = makeChess(parts.join(' '));
+      return flipped.moves({ verbose: true })
+        .filter(m => m.to === targetSquare)
+        .map(m => m.from);
+    }
+    return chess.moves({ verbose: true })
+      .filter(m => m.to === targetSquare)
+      .map(m => m.from);
+  }
+
+  // Defenders of `targetSquare` for `defenderColor`: simulate each
+  // attacker capture, then see if any of defenderColor's pieces can
+  // legally recapture on that square.
+  function getDefenders(chess, targetSquare, defenderColor, attackers) {
+    if (attackers.length === 0) return [];
+
+    const candidates = [];
+    for (const aSq of attackers) {
+      const test = makeChess(chess.fen());
+      // Flip turn to the attacker's color so the move is legal.
+      try {
+        const fenParts = test.fen().split(' ');
+        fenParts[1] = defenderColor === 'w' ? 'b' : 'w';
+        fenParts[3] = '-';
+        test.load(fenParts.join(' '));
+      } catch (e) { continue; }
+
+      try { test.move({ from: aSq, to: targetSquare, promotion: 'q' }); }
+      catch (e) { continue; }
+
+      // Now flip back to defender and see who can recapture on targetSquare.
+      const fenParts = test.fen().split(' ');
+      fenParts[1] = defenderColor;
+      fenParts[3] = '-';
+      const defenderTurn = makeChess(fenParts.join(' '));
+
+      const recaptures = defenderTurn.moves({ verbose: true })
+        .filter(m => m.to === targetSquare)
+        .map(m => m.from);
+
+      for (const rSq of recaptures) {
+        if (!candidates.includes(rSq)) candidates.push(rSq);
+      }
+    }
+    return candidates;
+  }
+
+  // Combined helper returning attackers + defenders for a square.
   function getAttackersDefenders(chess, color, toSquare) {
     const oppColor = color === 'w' ? 'b' : 'w';
 
-    let attackerSquares = [];
-    try { attackerSquares = chess.attackers(toSquare, oppColor) || []; }
-    catch (e) { attackerSquares = []; }
+    const attackerSquares = getAttackers(chess, toSquare, oppColor);
+    const defenderSquares = getDefenders(chess, toSquare, color, attackerSquares);
 
-    const legalMoves = chess.moves({ verbose: true });
-    const legalAttackers = attackerSquares.filter(sq =>
-      legalMoves.some(m => m.from === sq && m.to === toSquare)
-    );
-    const legalAttackerPieces = legalAttackers.map(sq => chess.get(sq));
-
-    let defenderSquares = [];
-    try { defenderSquares = chess.attackers(toSquare, color) || []; }
-    catch (e) { defenderSquares = []; }
-
-    const legalDefenders = [];
-    for (const dSq of defenderSquares) {
-      let isLegalDefender = true;
-      for (const aSq of legalAttackers) {
-        const test = makeChess(chess.fen());
-        try { test.move({ from: aSq, to: toSquare }); } catch (e) { continue; }
-        const canRecapture = test.moves({ verbose: true })
-          .some(m => m.from === dSq && m.to === toSquare);
-        if (!canRecapture) { isLegalDefender = false; break; }
-      }
-      if (isLegalDefender) legalDefenders.push(dSq);
-    }
-    const legalDefenderPieces = legalDefenders.map(sq => chess.get(sq));
+    const attackerPieces = attackerSquares.map(sq => chess.get(sq));
+    const defenderPieces = defenderSquares.map(sq => chess.get(sq));
 
     return {
-      attackers: { squares: legalAttackers, pieces: legalAttackerPieces, length: legalAttackers.length },
-      defenders: { squares: legalDefenders, pieces: legalDefenderPieces, length: legalDefenders.length }
+      attackers: { squares: attackerSquares, pieces: attackerPieces, length: attackerSquares.length },
+      defenders: { squares: defenderSquares, pieces: defenderPieces, length: defenderSquares.length }
     };
   }
 
+  // Could the piece on `square` have been saved in this position?
+  // `color` is the color of the piece we're testing (defender's perspective).
   function couldBeSaved(chess, square, color) {
-    let attackers = [];
-    try { attackers = chess.attackers(square, color === 'w' ? 'b' : 'w') || []; }
-    catch (e) { attackers = []; }
+    const oppColor = color === 'w' ? 'b' : 'w';
+    const attackers = getAttackers(chess, square, oppColor);
 
     if (attackers.length === 0) {
+      // Not attacked — no "saving" needed. Any other legal move means
+      // the piece wasn't forced to stay.
       const moves = chess.moves({ verbose: true });
       for (const m of moves) {
         if (m.from !== square) return true;
@@ -978,24 +1024,27 @@
       return false;
     }
 
-    const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
+    // It's attacked. Could it move somewhere safe?
+    // Generate its legal moves (need the correct side to move).
+    const turn = chess.turn();
+    let mover = chess;
+    if (turn !== color) {
+      const fenParts = chess.fen().split(' ');
+      fenParts[1] = color;
+      fenParts[3] = '-';
+      mover = makeChess(fenParts.join(' '));
+    }
+
+    const moves = mover.moves({ verbose: true }).filter(m => m.from === square);
     for (const m of moves) {
-      const test = makeChess(m.after);
-      let stillAttacked = [];
-      try {
-        stillAttacked = test.attackers(m.to, color === 'w' ? 'b' : 'w') || [];
-      } catch (e) { stillAttacked = []; }
+      const after = makeChess(m.after);
+      const stillAttacked = getAttackers(after, m.to, oppColor);
       if (stillAttacked.length === 0) return true;
     }
     return false;
   }
 
   // Return true if the move at `index` was a material sacrifice.
-  // Adapted from Brilliant Chess / Chesskit, with two fixes:
-  //   * Case 0: the piece that just moved is hanging on its new square.
-  //   * Case 1: the "captured" exclusion was removed — a piece that just
-  //     captured can still be a sacrifice (Bxe5: bishop takes knight, then
-  //     lands on a square where it's attacked and undefended).
   function isSacrifice(index) {
     const mv = history[index - 1];
     if (!mv) return false;
@@ -1028,44 +1077,35 @@
         const { attackers, defenders } =
           getAttackersDefenders(chessAfter, moverColor, sq.square);
 
-        // ----- Case 0: the piece that just moved is now hanging. -----
-        // This is the key new case. The moved piece is attacked and
-        // undefended on its destination square — a real sacrifice even
-        // if it just captured something.
+        // Case 0: the piece that just moved is hanging on its new square.
         if (playedMove.to === sq.square) {
           if (attackers.length > 0 && defenders.length === 0) {
-            // Don't count trivial trades: if what we captured is worth
-            // strictly more than what's now hanging, we made money, not a sac.
             const capturedVal = captured ? PIECE_VALUES[captured] : 0;
             const pieceVal = PIECE_VALUES[sq.type];
-            if (capturedVal < pieceVal || capturedVal === pieceVal) {
+            if (capturedVal <= pieceVal) {
               sacrificing.push(sq.square);
               continue;
             }
           }
         }
 
-        // ----- Case 1: undefended and attacked (any piece) -----
-        // Note: the `captured` exclusion was REMOVED. A capture move can
-        // still leave a piece hanging.
+        // Case 1: undefended and attacked (any piece).
         if (defenders.length === 0 && attackers.length > 0) {
           const capturedVal = captured ? PIECE_VALUES[captured] : 0;
           const pieceVal = PIECE_VALUES[sq.type];
-          // Skip if we captured something worth strictly more than this
-          // piece — that's a profitable trade, not a sacrifice.
-          if (capturedVal < pieceVal || capturedVal === pieceVal) {
+          if (capturedVal <= pieceVal) {
             sacrificing.push(sq.square);
             continue;
           }
         }
 
-        // ----- Case 2: knight or bishop attacked by a pawn -----
+        // Case 2: knight or bishop attacked by a pawn.
         if ((sq.type === 'n' || sq.type === 'b')) {
           const pawnAttacker = attackers.pieces.find(p => p && p.type === 'p');
           if (pawnAttacker) { sacrificing.push(sq.square); continue; }
         }
 
-        // ----- Case 3: rook hanging -----
+        // Case 3: rook hanging.
         if (sq.type === 'r' && attackers.length > 0 &&
             captured !== 'r' && captured !== 'q' &&
             !(attackers.length === 1 &&
@@ -1076,7 +1116,7 @@
           continue;
         }
 
-        // ----- Case 4: queen hanging -----
+        // Case 4: queen hanging.
         if (sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
             !(attackers.length === 1 && attackers.pieces[0]?.type === 'q' && defenders.length > 0) &&
             !(attackers.length === 1 && attackers.pieces[0]?.type === 'r' &&
@@ -1218,14 +1258,12 @@
     mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
     mv.winDrop = winDrop;
 
-    // Brilliant — any sound sacrifice.
     const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
     if (brilliant) {
       mv.cls = 'brilliant';
       return;
     }
 
-    // Dead-won / dead-lost exemption.
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
     if (bothWinning || bothLosing) {
