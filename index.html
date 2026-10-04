@@ -116,6 +116,27 @@
     }
     #moves .mv:hover { background: #eef; }
     #moves .mv.current { background: #cde; font-weight: bold; }
+
+    /* Engine panel */
+    #evalLine {
+      font-size: 22px;
+      font-weight: 600;
+      font-family: monospace;
+      text-align: center;
+      padding: 4px 0;
+    }
+    #bestMove {
+      font-family: monospace;
+      font-size: 13px;
+      text-align: center;
+      color: #555;
+    }
+    #engineStatus {
+      font-size: 11px;
+      color: #999;
+      text-align: center;
+      margin-top: 6px;
+    }
   </style>
 </head>
 <body>
@@ -130,6 +151,16 @@
     </div>
 
     <div class="side">
+      <div class="panel">
+        <h3>Engine</h3>
+        <div id="evalLine">—</div>
+        <div id="bestMove">—</div>
+        <div id="engineStatus">Loading engine…</div>
+        <div style="margin-top:8px;">
+          <button id="analyzeBtn" disabled>Analyze Position</button>
+        </div>
+      </div>
+
       <div class="panel">
         <h3>PGN</h3>
         <textarea id="pgnInput"
@@ -188,9 +219,9 @@
     }
 
     // ---------- State ----------
-    let game = new Chess();       // live position
-    let history = [];             // array of {san, fen} — fen is position AFTER move
-    let cursor = 0;               // how many moves are applied (0 = start pos)
+    let game = new Chess();
+    let history = [];
+    let cursor = 0;
 
     // ---------- Board ----------
     const board = Chessboard('board', {
@@ -206,7 +237,6 @@
       const move = game.move({ from: source, to: target, promotion: 'q' });
       if (move === null) return 'snapback';
 
-      // If we're mid-history, drop the future and append
       history = history.slice(0, cursor);
       history.push({ san: move.san, fen: game.fen() });
       cursor = history.length;
@@ -262,7 +292,6 @@
       }
       el.innerHTML = html;
 
-      // click handlers
       el.querySelectorAll('.mv').forEach(span => {
         span.onclick = () => gotoPly(parseInt(span.dataset.idx, 10));
       });
@@ -283,11 +312,9 @@
     }
 
     // ---------- Navigation ----------
-    // cursor = N means: position after N half-moves have been played.
     function gotoPly(n) {
       n = Math.max(0, Math.min(n, history.length));
 
-      // Rebuild position from scratch (cheap; chess.js is fast).
       game = new Chess();
       for (let i = 0; i < n; i++) {
         game.move(history[i].san);
@@ -301,7 +328,6 @@
     document.getElementById('next').onclick  = () => gotoPly(cursor + 1);
     document.getElementById('last').onclick  = () => gotoPly(history.length);
 
-    // Arrow keys too
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
       if (e.key === 'ArrowLeft')  gotoPly(cursor - 1);
@@ -321,7 +347,6 @@
         return;
       }
 
-      // Replay to build our history with FENs.
       const replay = new Chess();
       const moves = g.history();
       const newHistory = [];
@@ -344,7 +369,7 @@
 
       const g = new Chess();
       try {
-        g.load(fen);   // throws on invalid FEN
+        g.load(fen);
       } catch (err) {
         alert('Invalid FEN');
         return;
@@ -365,8 +390,84 @@
       renderAll();
     };
 
+    // ---------- Stockfish ----------
+    let sf = null;
+    let sfReady = false;
+    let sfResolve = null;
+
+    function initStockfish() {
+      sf = new Worker('https://cdn.jsdelivr.net/npm/stockfish@18.0.8/src/stockfish-18-lite-single.js');
+
+      sf.onerror = (err) => {
+        document.getElementById('engineStatus').textContent =
+          'Engine failed to load: ' + err.message;
+      };
+
+      sf.onmessage = (e) => {
+        const line = e.data;
+
+        if (line === 'uciok') {
+          sf.postMessage('isready');
+          return;
+        }
+
+        if (line === 'readyok') {
+          sfReady = true;
+          document.getElementById('engineStatus').textContent = 'Engine ready';
+          document.getElementById('analyzeBtn').disabled = false;
+          return;
+        }
+
+        if (typeof line === 'string' && line.startsWith('info') && line.includes('score')) {
+          const parts = line.split(' ');
+          const scoreIdx = parts.indexOf('score');
+          if (scoreIdx !== -1) {
+            const type = parts[scoreIdx + 1];
+            const val  = parseInt(parts[scoreIdx + 2], 10);
+
+            let text;
+            if (type === 'cp') {
+              const turn = game.turn();
+              const whiteScore = turn === 'w' ? val : -val;
+              text = (whiteScore / 100).toFixed(2);
+              if (whiteScore > 0) text = '+' + text;
+            } else {
+              const turn = game.turn();
+              const whiteMate = turn === 'w' ? val : -val;
+              text = 'M' + Math.abs(whiteMate);
+            }
+            document.getElementById('evalLine').textContent = text;
+          }
+        }
+
+        if (typeof line === 'string' && line.startsWith('bestmove')) {
+          const move = line.split(' ')[1];
+          document.getElementById('bestMove').textContent = 'Best: ' + move;
+          if (sfResolve) { sfResolve(move); sfResolve = null; }
+        }
+      };
+
+      sf.postMessage('uci');
+    }
+
+    function analyzePosition(depth = 14) {
+      return new Promise((resolve) => {
+        if (!sfReady) { resolve(null); return; }
+        sfResolve = resolve;
+        sf.postMessage('position fen ' + game.fen());
+        sf.postMessage('go depth ' + depth);
+      });
+    }
+
+    document.getElementById('analyzeBtn').onclick = () => {
+      document.getElementById('evalLine').textContent = '…';
+      document.getElementById('bestMove').textContent = '…';
+      analyzePosition(14);
+    };
+
     // ---------- Init ----------
     renderAll();
+    initStockfish();
   </script>
 
 </body>
