@@ -278,23 +278,35 @@
 
     #analyzeAllBtn { width: 100%; margin-top: 10px; }
 
-    .soon-panel { opacity: 0.85; }
-    .soon-panel .soon-tag {
-      display: inline-block;
-      background: #d33;
-      color: #fff;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 3px;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-    .soon-panel p {
+    #aiOutput {
       font-size: 13px;
-      color: var(--muted);
       line-height: 1.5;
-      margin: 6px 0;
+      color: var(--text);
+      padding: 8px;
+      background: rgba(0,0,0,0.03);
+      border-radius: 4px;
+      min-height: 60px;
+      white-space: pre-wrap;
+    }
+    body.dark #aiOutput {
+      background: rgba(255,255,255,0.05);
+    }
+
+    #aiModel {
+      width: 100%;
+      font-family: monospace;
+      font-size: 12px;
+      padding: 6px;
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      background: var(--panel);
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    #aiExplainBtn {
+      width: 100%;
+      margin-bottom: 8px;
     }
 
     @media (max-width: 1500px) {
@@ -385,12 +397,14 @@
       <div id="analyzeAllStatus" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px;"></div>
     </div>
 
-    <div class="panel soon-panel">
-      <span class="soon-tag">SOON</span>
+    <div class="panel">
       <h3 style="margin-top:0;">AI Explanation</h3>
-      <p>Move-by-move explanations powered by:</p>
-      <p>• DeepSeek<br>• Qwen<br>• Any free API-key model</p>
-      <p style="margin-top:10px;">Bring your own key ❤️</p>
+      <select id="aiModel">
+        <option value="deepseek-v4.1-flash:free">deepseek-v4.1-flash:free</option>
+        <option value="qwen3.8-flash:free">qwen3.8-flash:free</option>
+      </select>
+      <button id="aiExplainBtn">Explain Current Move</button>
+      <div id="aiOutput"><em style="color:#999">Load a game, analyze it, then click a move and hit Explain.</em></div>
     </div>
 
   </div>
@@ -403,6 +417,7 @@
 
   const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+  const PROXY_URL = 'https://chess-analyzer-proxy.ju4nit3r78.workers.dev';
 
   const board = Chessboard('board', {
     draggable: true,
@@ -425,7 +440,8 @@
         san: move.san,
         fen: game.fen(),
         uci: move.from + move.to + (move.promotion || ''),
-        cls: null, cpLoss: null, winDrop: null
+        cls: null, cpLoss: null, winDrop: null,
+        evalBefore: null, evalAfter: null
       });
       cursor = history.length;
       renderAll();
@@ -578,7 +594,8 @@
       newHistory.push({
         san: m.san, fen: replay.fen(),
         uci: m.from + m.to + (m.promotion || ''),
-        cls: null, cpLoss: null, winDrop: null
+        cls: null, cpLoss: null, winDrop: null,
+        evalBefore: null, evalAfter: null
       });
     }
 
@@ -606,6 +623,7 @@
     document.getElementById('pgnInput').value = '';
     document.getElementById('fenInput').value = '';
     document.getElementById('analyzeAllStatus').textContent = '';
+    document.getElementById('aiOutput').innerHTML = '<em style="color:#999">Load a game, analyze it, then click a move and hit Explain.</em>';
     renderAll();
   };
 
@@ -945,11 +963,6 @@
   // ============================================================
   // ---------- Sacrifice detection (chess.js 1.0.0) ------------
   // ============================================================
-  // Excluded cases:
-  //   - Move delivers check or checkmate. The opponent's reply is forced,
-  //     so no "hanging piece" is actually takeable that turn.
-  //   - The piece was already hanging before the move. That's pre-existing
-  //     vulnerability, not a new sacrifice.
 
   function isSacrifice(index) {
     const mv = history[index - 1];
@@ -964,12 +977,8 @@
       chessBefore = new Chess(fenBefore);
     } catch (e) { return false; }
 
-    // If the move ended the game, there's no follow-up — not a sacrifice.
     if (chessAfter.isCheckmate()) return false;
-
-    // If the move gives check, the opponent's reply is forced. Any "hanging
-    // piece" in the after-position can't actually be taken this turn.
-    if (chessAfter.isCheck()) return false;
+    if (chessAfter.isCheck())     return false;
 
     let playedMove;
     try {
@@ -1194,6 +1203,9 @@
     const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
+    mv.evalBefore = preCpMover;
+    mv.evalAfter  = postCpMover;
+
     const clamp = v => Math.max(-1000, Math.min(1000, v));
     const preWin  = cpToWinProb(clamp(preCpMover));
     const postWin = cpToWinProb(clamp(postCpMover));
@@ -1256,6 +1268,67 @@
     document.getElementById('analyzeAllStatus').textContent = 'Done.';
     renderMoves();
     renderBoardOverlay();
+  };
+
+  // ============================================================
+  // ---------- AI Explanation (via Cloudflare Worker proxy) ----
+  // ============================================================
+
+  document.getElementById('aiExplainBtn').onclick = async () => {
+    const model  = document.getElementById('aiModel').value;
+    const output = document.getElementById('aiOutput');
+
+    if (cursor === 0) {
+      output.innerHTML = '<em style="color:#d99">Load a game first.</em>';
+      return;
+    }
+
+    const mv = history[cursor - 1];
+    const fenBefore = cursor === 1 ? START_FEN : history[cursor - 2].fen;
+    const fenAfter  = mv.fen;
+
+    output.innerHTML = '<em style="color:#999">Thinking…</em>';
+
+    // Build the prompt with everything the model needs.
+    const prompt = `You are a chess coach. Explain this move in 2-3 short sentences.
+
+Move played: ${mv.san} (${mv.uci})
+Classification: ${mv.cls || 'unclassified'}
+Position before (FEN): ${fenBefore}
+Position after (FEN): ${fenAfter}
+Eval before (mover POV, centipawns): ${mv.evalBefore ?? 'unknown'}
+Eval after (mover POV, centipawns): ${mv.evalAfter ?? 'unknown'}
+
+Explain in plain English why this move was classified as ${mv.cls || 'unclassified'}. If it's Brilliant, explain what the sacrifice accomplishes. If it's a mistake or blunder, explain what was given up. Keep it under 3 sentences. No markdown.`;
+
+    try {
+      const res = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 200,
+          temperature: 0.7
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        output.innerHTML = `<em style="color:#d33">API error ${res.status}: ${errText.slice(0, 200)}</em>`;
+        return;
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (!text) {
+        output.innerHTML = '<em style="color:#d33">Empty response from API.</em>';
+        return;
+      }
+      output.textContent = text;
+    } catch (err) {
+      output.innerHTML = `<em style="color:#d33">Fetch failed: ${err.message}</em>`;
+    }
   };
 
   window.addEventListener('resize', () => renderBoardOverlay());
