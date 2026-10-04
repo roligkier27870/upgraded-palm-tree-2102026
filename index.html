@@ -395,41 +395,22 @@
     let sfReady = false;
     let sfResolve = null;
 
-    async function initStockfish() {
+    function initStockfish() {
       document.getElementById('engineStatus').textContent = 'Loading engine…';
 
-      const cdnUrl = 'https://cdn.jsdelivr.net/npm/stockfish@19.0.0/bin/stockfish-19-lite-single.js';
+      // Use the lite single-threaded build. This is the ~1.6MB WASM
+      // engine that works on GitHub Pages without COOP/COEP headers.
+      const cdnUrl = 'https://cdn.jsdelivr.net/npm/stockfish@19.0.0/stockfish-19-lite-single.js';
 
-      // 1. Fetch the loader script as text.
-      let loaderText;
-      try {
-        const res = await fetch(cdnUrl);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        loaderText = await res.text();
-      } catch (err) {
-        document.getElementById('engineStatus').textContent =
-          'Engine download failed: ' + err.message;
-        return;
-      }
-
-      // 2. Prepend a fetch shim so the loader finds its .wasm on the CDN.
-      const base = cdnUrl.substring(0, cdnUrl.lastIndexOf('/') + 1);
-      const patched = `
-        var __sfBase = ${JSON.stringify(base)};
-        (function() {
-          var _fetch = self.fetch;
-          self.fetch = function(input, init) {
-            if (typeof input === 'string' && input.indexOf('stockfish-19-lite-single.wasm') !== -1) {
-              return _fetch(__sfBase + 'stockfish-19-lite-single.wasm', init);
-            }
-            return _fetch(input, init);
-          };
-        })();
-        ${loaderText}
-      `;
-
-      // 3. Blob worker — same-origin, so the browser accepts it.
-      const blob = new Blob([patched], { type: 'application/javascript' });
+      // The trick: create a same-origin Blob worker whose only job is to
+      // importScripts() the real engine from the CDN. Browsers reject
+      // new Worker(crossOriginUrl) unconditionally, but they accept a
+      // same-origin Blob URL. The import inside the Blob fetches the
+      // real script via CORS (jsDelivr sends Access-Control-Allow-Origin: *).
+      const blob = new Blob(
+        [`importScripts("${cdnUrl}");`],
+        { type: 'application/javascript' }
+      );
       const blobUrl = URL.createObjectURL(blob);
 
       sf = new Worker(blobUrl);
