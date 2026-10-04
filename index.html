@@ -22,15 +22,13 @@
 
     .layout { display: flex; gap: 24px; align-items: flex-start; }
 
-    /* Wrapper so badges can be absolutely positioned over the board. */
     .board-wrap {
       position: relative;
-      width: 480px;
-      height: 480px;
+      width: 640px;
+      height: 640px;
     }
-    #board { width: 480px; }
+    #board { width: 640px; }
 
-    /* Overlay layer for square badges. Sits above pieces, below nothing. */
     #board-overlay {
       position: absolute;
       inset: 0;
@@ -39,17 +37,16 @@
     }
     #board-overlay .sq-badge {
       position: absolute;
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
-      /* top-right of the square, small inset */
       margin: 2px;
       filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
     }
 
-    .side { width: 300px; display: flex; flex-direction: column; gap: 12px; }
+    .side { width: 320px; display: flex; flex-direction: column; gap: 12px; }
 
     .panel {
       background: #fff;
@@ -101,12 +98,11 @@
       color: #555;
       word-break: break-all;
       text-align: center;
-      max-width: 480px;
+      max-width: 640px;
     }
 
-    /* Move list: badge sits at the top of the move text's box */
     #moves {
-      max-height: 280px;
+      max-height: 320px;
       overflow-y: auto;
       font-family: monospace;
       font-size: 13px;
@@ -137,7 +133,6 @@
       margin-top: 2px;
     }
 
-    /* Shared icon classes for both the board overlay and the move list */
     .cls-brilliant  { background-image: url('icons/Brilliant.png'); }
     .cls-great      { background-image: url('icons/Great.png'); }
     .cls-best       { background-image: url('icons/Best.png'); }
@@ -223,43 +218,22 @@
     const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
-    // ---------- Unicode pieces ----------
-    const UNICODE = {
-      wK:'\u2654', wQ:'\u2655', wR:'\u2656',
-      wB:'\u2657', wN:'\u2658', wP:'\u2659',
-      bK:'\u265A', bQ:'\u265B', bR:'\u265C',
-      bB:'\u265D', bN:'\u265E', bP:'\u265F'
-    };
-
-    function unicodePieceTheme(piece) {
-      const glyph = UNICODE[piece] || '?';
-      const isWhite = piece[0] === 'w';
-      const fill = isWhite ? '#ffffff' : '#111111';
-      const stroke = isWhite ? '#111111' : '#000000';
-      const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
-          `<text x="50" y="78" font-size="82" text-anchor="middle" ` +
-                `font-family="DejaVu Sans, Arial, sans-serif" ` +
-                `fill="${fill}" stroke="${stroke}" stroke-width="1.5">` +
-            glyph +
-          `</text></svg>`;
-      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-    }
+    // ---------- Board ----------
+    // pieceTheme uses chessboard.js's {piece} token (wK, bQ, etc.)
+    // and expects a file named after it: pieces/wK.png, pieces/bQ.png, ...
+    const board = Chessboard('board', {
+      draggable: true,
+      position: 'start',
+      pieceTheme: 'pieces/{piece}.png',
+      dropOffBoard: 'snapback',
+      onDrop: onDrop,
+      onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); }
+    });
 
     // ---------- State ----------
     let game = new Chess();
     let history = [];
     let cursor = 0;
-
-    // ---------- Board ----------
-    const board = Chessboard('board', {
-      draggable: true,
-      position: 'start',
-      pieceTheme: unicodePieceTheme,
-      dropOffBoard: 'snapback',
-      onDrop: onDrop,
-      onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); }
-    });
 
     function onDrop(source, target) {
       const move = game.move({ from: source, to: target, promotion: 'q' });
@@ -271,40 +245,34 @@
         fen: game.fen(),
         uci: move.from + move.to + (move.promotion || ''),
         cls: null,
-        cpLoss: null
+        cpLoss: null,
+        winDrop: null
       });
       cursor = history.length;
 
       renderAll();
     }
 
-    // ---------- Board overlay (square badges) ----------
-    // Board is 8x8. Files a..h left→right, ranks 8..1 top→bottom (from White's view).
-    // chessboard.js flips orientation? We assume White at bottom, standard.
+    // ---------- Board overlay ----------
     function renderBoardOverlay() {
       const overlay = document.getElementById('board-overlay');
       if (!overlay) return;
       overlay.innerHTML = '';
 
-      // Only show the badge for the move that just landed (the current ply),
-      // or for every move up to cursor? We show the badge for the move at
-      // position `cursor` — i.e. the last move played to reach the current
-      // position.
       if (cursor === 0) return;
       const mv = history[cursor - 1];
       if (!mv || !mv.cls) return;
 
-      const dest = mv.uci.slice(2, 4);      // 'e4'
+      const dest = mv.uci.slice(2, 4);
       const file = dest[0];
       const rank = dest[1];
 
-      // Board size in px (matches .board-wrap / #board width).
       const wrap = overlay.parentElement;
       const size = wrap.clientWidth;
       const sq = size / 8;
 
-      const fileIdx = file.charCodeAt(0) - 'a'.charCodeAt(0);   // 0..7
-      const rankIdx = 8 - parseInt(rank, 10);                   // 0..7 top→bottom
+      const fileIdx = file.charCodeAt(0) - 'a'.charCodeAt(0);
+      const rankIdx = 8 - parseInt(rank, 10);
 
       const x = fileIdx * sq;
       const y = rankIdx * sq;
@@ -432,7 +400,8 @@
           fen: replay.fen(),
           uci: m.from + m.to + (m.promotion || ''),
           cls: null,
-          cpLoss: null
+          cpLoss: null,
+          winDrop: null
         });
       }
 
@@ -654,6 +623,11 @@
       requestEval(game.fen(), 16, 'manual');
     };
 
+    // ---------- Win probability (Lichess formula) ----------
+    function cpToWinProb(cp) {
+      return 1 / (1 + Math.exp(-0.00368208 * cp));
+    }
+
     // ---------- Classification ----------
     function materialCount(fen) {
       let w = 0, b = 0;
@@ -704,6 +678,7 @@
       if (isTheory(index, mv.san)) {
         mv.cls = 'theory';
         mv.cpLoss = 0;
+        mv.winDrop = 0;
         return;
       }
 
@@ -716,15 +691,30 @@
         mv.uci.startsWith(pre.bestUci.slice(0, 4)) &&
         (mv.uci.length === 4 || mv.uci[4] === pre.bestUci[4]);
 
+      const post = await requestEval(fenAfter, depth, null);
+      if (!post || post.cpWhite === null) return;
+
+      const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+
+      const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
+      const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
+
+      const clamp = v => Math.max(-1000, Math.min(1000, v));
+      const preWin  = cpToWinProb(clamp(preCpMover));
+      const postWin = cpToWinProb(clamp(postCpMover));
+      const winDrop = Math.max(0, preWin - postWin);
+
+      mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
+      mv.winDrop = winDrop;
+
+      const bothWinning = preCpMover >= 900 && postCpMover >= 900;
+      const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
+      if (bothWinning || bothLosing) {
+        mv.cls = winDrop <= 0.005 ? 'best' : 'good';
+        return;
+      }
+
       if (playedMatchesBest) {
-        const post = await requestEval(fenAfter, depth, null);
-        if (!post) return;
-
-        const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-        const preCpMover   = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
-        const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
-        const loss = Math.max(0, preCpMover - postCpMover);
-
         const matBefore = materialCount(fenBefore);
         const matAfter  = materialCount(fenAfter);
         const moverBefore = moverIsWhite ? matBefore.w : matBefore.b;
@@ -737,34 +727,24 @@
         const netSac   = oppLost - moverLost;
 
         if (netSac <= -1 && preCpMover >= 100) {
-          mv.cpLoss = loss;
           mv.cls = 'brilliant';
           return;
         }
 
-        mv.cpLoss = loss;
-        mv.cls = loss <= 10 ? 'best' : 'great';
+        mv.cls = winDrop <= 0.005 ? 'best' : 'great';
         return;
       }
 
-      const post = await requestEval(fenAfter, depth, null);
-      if (!post || post.cpWhite === null) return;
-
-      const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-      const preCpMover   = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
-      const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
-      const loss = Math.max(0, preCpMover - postCpMover);
-
-      mv.cpLoss = loss;
-      mv.cls = classifyLoss(loss);
+      mv.cls = classifyWinDrop(winDrop);
     }
 
-    function classifyLoss(loss) {
-      if (loss <= 10)  return 'best';
-      if (loss <= 30)  return 'excellent';
-      if (loss <= 60)  return 'good';
-      if (loss <= 120) return 'inaccuracy';
-      if (loss <= 250) return 'mistake';
+    function classifyWinDrop(winDrop) {
+      const pp = winDrop * 100;
+      if (pp <= 0.5)  return 'best';
+      if (pp <= 1.5)  return 'excellent';
+      if (pp <= 3.5)  return 'good';
+      if (pp <= 7)    return 'inaccuracy';
+      if (pp <= 14)   return 'mistake';
       return 'blunder';
     }
 
@@ -796,7 +776,6 @@
       renderBoardOverlay();
     };
 
-    // Re-render overlay on window resize so square math stays correct.
     window.addEventListener('resize', () => renderBoardOverlay());
 
     // ---------- Init ----------
