@@ -21,7 +21,33 @@
     }
 
     .layout { display: flex; gap: 24px; align-items: flex-start; }
+
+    /* Wrapper so badges can be absolutely positioned over the board. */
+    .board-wrap {
+      position: relative;
+      width: 480px;
+      height: 480px;
+    }
     #board { width: 480px; }
+
+    /* Overlay layer for square badges. Sits above pieces, below nothing. */
+    #board-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #board-overlay .sq-badge {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      /* top-right of the square, small inset */
+      margin: 2px;
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
+    }
 
     .side { width: 300px; display: flex; flex-direction: column; gap: 12px; }
 
@@ -78,6 +104,7 @@
       max-width: 480px;
     }
 
+    /* Move list: badge sits at the top of the move text's box */
     #moves {
       max-height: 280px;
       overflow-y: auto;
@@ -85,8 +112,8 @@
       font-size: 13px;
       line-height: 2.1;
     }
-    #moves .pair { display: flex; gap: 6px; align-items: center; }
-    #moves .num { color: #999; width: 26px; text-align: right; }
+    #moves .pair { display: flex; gap: 6px; align-items: flex-start; }
+    #moves .num { color: #999; width: 26px; text-align: right; padding-top: 4px; }
     #moves .mv {
       cursor: pointer;
       padding: 0 4px;
@@ -99,7 +126,6 @@
     #moves .mv:hover { background: #eef; }
     #moves .mv.current { background: #cde; font-weight: bold; }
 
-    /* Badge sits at the top of the move text's line box */
     #moves .mv .badge {
       display: inline-block;
       width: 15px;
@@ -108,8 +134,10 @@
       background-repeat: no-repeat;
       background-position: center;
       flex-shrink: 0;
-      margin-top: 2px;   /* nudges up to align with cap height of the SAN */
+      margin-top: 2px;
     }
+
+    /* Shared icon classes for both the board overlay and the move list */
     .cls-brilliant  { background-image: url('icons/Brilliant.png'); }
     .cls-great      { background-image: url('icons/Great.png'); }
     .cls-best       { background-image: url('icons/Best.png'); }
@@ -137,7 +165,10 @@
 
   <div class="layout">
     <div>
-      <div id="board"></div>
+      <div class="board-wrap">
+        <div id="board"></div>
+        <div id="board-overlay"></div>
+      </div>
       <div id="status">White to move</div>
       <div id="fen"></div>
     </div>
@@ -190,8 +221,6 @@
 
   <script>
     const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-
-    // Material values for Brilliant detection.
     const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
     // ---------- Unicode pieces ----------
@@ -229,7 +258,7 @@
       pieceTheme: unicodePieceTheme,
       dropOffBoard: 'snapback',
       onDrop: onDrop,
-      onSnapEnd: () => board.position(game.fen())
+      onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); }
     });
 
     function onDrop(source, target) {
@@ -249,8 +278,50 @@
       renderAll();
     }
 
+    // ---------- Board overlay (square badges) ----------
+    // Board is 8x8. Files a..h left→right, ranks 8..1 top→bottom (from White's view).
+    // chessboard.js flips orientation? We assume White at bottom, standard.
+    function renderBoardOverlay() {
+      const overlay = document.getElementById('board-overlay');
+      if (!overlay) return;
+      overlay.innerHTML = '';
+
+      // Only show the badge for the move that just landed (the current ply),
+      // or for every move up to cursor? We show the badge for the move at
+      // position `cursor` — i.e. the last move played to reach the current
+      // position.
+      if (cursor === 0) return;
+      const mv = history[cursor - 1];
+      if (!mv || !mv.cls) return;
+
+      const dest = mv.uci.slice(2, 4);      // 'e4'
+      const file = dest[0];
+      const rank = dest[1];
+
+      // Board size in px (matches .board-wrap / #board width).
+      const wrap = overlay.parentElement;
+      const size = wrap.clientWidth;
+      const sq = size / 8;
+
+      const fileIdx = file.charCodeAt(0) - 'a'.charCodeAt(0);   // 0..7
+      const rankIdx = 8 - parseInt(rank, 10);                   // 0..7 top→bottom
+
+      const x = fileIdx * sq;
+      const y = rankIdx * sq;
+
+      const badge = document.createElement('div');
+      badge.className = 'sq-badge cls-' + mv.cls;
+      badge.style.left = x + 'px';
+      badge.style.top  = y + 'px';
+      badge.title = mv.cls;
+      overlay.appendChild(badge);
+    }
+
     // ---------- Rendering ----------
-    function renderBoard() { board.position(game.fen(), false); }
+    function renderBoard() {
+      board.position(game.fen(), false);
+      renderBoardOverlay();
+    }
 
     function renderStatus() {
       const turn = game.turn() === 'w' ? 'White' : 'Black';
@@ -396,14 +467,10 @@
     let analyzingAll = false;
     let autoTimer = null;
 
-    // Single queue: every request waits for the previous to finish.
-    // Each entry: { fen, depth, resolve }
     let engineQueue = [];
     let engineBusy = false;
 
-    // Display state for the panel (only updated by foreground runs).
     let lastPvUci = [];
-    let panelOwner = null;   // 'auto' | 'manual' | null
 
     function initStockfish() {
       document.getElementById('engineStatus').textContent = 'Loading engine…';
@@ -442,12 +509,10 @@
       sf.postMessage('uci');
     }
 
-    // Called for every line while a queued job is running.
     function handleEngineLine(l) {
       const job = engineQueue[0];
       if (!job) return;
 
-      // ---------- info lines ----------
       if (l.startsWith('info') && l.includes(' score ')) {
         const parts = l.split(' ');
 
@@ -456,12 +521,9 @@
           const type = parts[si + 1];
           const val  = parseInt(parts[si + 2], 10);
           if (!isNaN(val)) {
-            job.lastScore = (type === 'cp') ? val : job.lastScore;
-            job.lastMate  = (type === 'mate') ? val : job.lastMate;
-            if (type === 'cp')   job.lastMate  = null;
-            if (type === 'mate') job.lastScore = null;
+            if (type === 'cp')   { job.lastScore = val; job.lastMate = null; }
+            if (type === 'mate') { job.lastMate  = val; job.lastScore = null; }
 
-            // Update the engine panel only if this job owns it.
             if (job.owner === 'auto' || job.owner === 'manual') {
               document.getElementById('evalLine').textContent =
                 formatScore(type, val, job.fen.split(' ')[1]);
@@ -482,12 +544,10 @@
         return;
       }
 
-      // ---------- bestmove ----------
       if (l.startsWith('bestmove')) {
         const move = l.split(' ')[1];
         job.bestUci = move;
 
-        // Convert score → White-POV centipawns for the caller.
         const turn = job.fen.split(' ')[1];
         let cpWhite = null;
         if (job.lastMate !== null && job.lastMate !== undefined) {
@@ -522,8 +582,6 @@
       sf.postMessage('go depth ' + job.depth);
     }
 
-    // Public: enqueue an evaluation. Resolves when bestmove arrives.
-    // owner: 'auto' | 'manual' | null (null = silent, no panel update)
     function requestEval(fen, depth, owner = null) {
       return new Promise((resolve) => {
         if (!sfReady) { resolve(null); return; }
@@ -535,7 +593,6 @@
       });
     }
 
-    // ---------- Engine panel ----------
     function uciLineToSan(startFen, uciMoves) {
       const c = new Chess();
       try { c.load(startFen); } catch (e) { return []; }
@@ -599,10 +656,9 @@
 
     // ---------- Classification ----------
     function materialCount(fen) {
-      // Returns { w, b } in pawns. Kings ignored.
       let w = 0, b = 0;
-      const board = fen.split(' ')[0];
-      for (const ch of board) {
+      const boardStr = fen.split(' ')[0];
+      for (const ch of boardStr) {
         const lower = ch.toLowerCase();
         if (PIECE_VALUES[lower] !== undefined && lower !== 'k') {
           if (ch === ch.toUpperCase()) w += PIECE_VALUES[lower];
@@ -613,21 +669,19 @@
     }
 
     function isTheory(moveIndex, san) {
-      // Very small hardcoded book. Extend this list as you like.
-      // Keyed by half-move index (1-based) and SAN.
       const BOOK = [
-        ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],   // Ruy Lopez Closed
-        ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],   // Najdorf
-        ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],                // QGD
-        ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],               // Italian
-        ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],                 // KID
-        ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],             // Scotch
-        ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],              // Caro-Kann
-        ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],                // French
-        ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],               // Slav
-        ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],             // Scandi
-        ['c4','e5','Nc3','Nf6','Nf3','Nc6'],                          // English
-        ['Nf3','d5','g3','Nf6','Bg2','e6']                            // Reti
+        ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
+        ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],
+        ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],
+        ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],
+        ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],
+        ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],
+        ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],
+        ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],
+        ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],
+        ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],
+        ['c4','e5','Nc3','Nf6','Nf3','Nc6'],
+        ['Nf3','d5','g3','Nf6','Bg2','e6']
       ];
       for (const line of BOOK) {
         if (moveIndex > line.length) continue;
@@ -647,19 +701,15 @@
       const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
       const fenAfter  = mv.fen;
 
-      // 1. Theory check first — it short-circuits everything.
       if (isTheory(index, mv.san)) {
         mv.cls = 'theory';
         mv.cpLoss = 0;
         return;
       }
 
-      // 2. Eval before, playing best.
       const pre = await requestEval(fenBefore, depth, null);
       if (!pre || pre.cpWhite === null) return;
 
-      // 3. If the played move matches the engine's top choice, it can't
-      //    be worse than "best".
       const playedMatchesBest =
         pre.bestUci &&
         pre.bestUci !== '(none)' &&
@@ -667,8 +717,6 @@
         (mv.uci.length === 4 || mv.uci[4] === pre.bestUci[4]);
 
       if (playedMatchesBest) {
-        // Evaluate "second best" to decide best vs great vs brilliant.
-        // We approximate with a single follow-up eval.
         const post = await requestEval(fenAfter, depth, null);
         if (!post) return;
 
@@ -677,7 +725,6 @@
         const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
         const loss = Math.max(0, preCpMover - postCpMover);
 
-        // Material check for Brilliant.
         const matBefore = materialCount(fenBefore);
         const matAfter  = materialCount(fenAfter);
         const moverBefore = moverIsWhite ? matBefore.w : matBefore.b;
@@ -687,27 +734,19 @@
 
         const moverLost = moverBefore - moverAfter;
         const oppLost   = oppBefore - oppAfter;
-        const netSac   = oppLost - moverLost;   // negative = we gave up material
+        const netSac   = oppLost - moverLost;
 
-        // Brilliant: best move AND we sacrificed at least a pawn net
-        // AND the eval is still strongly in our favor (>= +1.0).
         if (netSac <= -1 && preCpMover >= 100) {
           mv.cpLoss = loss;
           mv.cls = 'brilliant';
           return;
         }
 
-        // Great: it's the best move and the second-best is clearly worse.
-        // We approximate "second best is worse" by checking whether the
-        // follow-up position leaves the eval close to pre (i.e. no
-        // obvious alternative equal to this).
-        // For now, a coarse approximation: if loss is tiny, it's best.
         mv.cpLoss = loss;
         mv.cls = loss <= 10 ? 'best' : 'great';
         return;
       }
 
-      // 4. Played move wasn't the top pick — compare evals.
       const post = await requestEval(fenAfter, depth, null);
       if (!post || post.cpWhite === null) return;
 
@@ -745,6 +784,7 @@
         await classifyMove(i, depth);
 
         renderMoves();
+        renderBoardOverlay();
         renderNavButtons();
         await new Promise(r => setTimeout(r, 0));
       }
@@ -753,7 +793,11 @@
       document.getElementById('analyzeAllBtn').disabled = false;
       document.getElementById('analyzeAllStatus').textContent = 'Done.';
       renderMoves();
+      renderBoardOverlay();
     };
+
+    // Re-render overlay on window resize so square math stays correct.
+    window.addEventListener('resize', () => renderBoardOverlay());
 
     // ---------- Init ----------
     renderAll();
