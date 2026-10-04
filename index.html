@@ -317,6 +317,7 @@
       renderStatus();
       renderMoves();
       renderNavButtons();
+      scheduleAutoAnalyze();
     }
 
     // ---------- Navigation ----------
@@ -403,6 +404,7 @@
     let sfReady = false;
     let sfResolve = null;
     let lastPvUci = [];
+    let autoTimer = null;
 
     // Convert a list of UCI moves into SAN, starting from a given position.
     function uciLineToSan(startFen, uciMoves) {
@@ -422,8 +424,6 @@
       return sans;
     }
 
-    // Format a score from Stockfish into a human-friendly string.
-    // Always from White's POV: + = White better, - = Black better.
     function formatScore(type, val, turn) {
       if (type === 'cp') {
         const whiteCp = turn === 'w' ? val : -val;
@@ -451,12 +451,22 @@
         line ? 'Line: ' + line : '';
     }
 
+    // Debounced auto-analyze. Cancels any pending run if you spam nav.
+    function scheduleAutoAnalyze() {
+      if (!sfReady) return;
+      if (autoTimer) clearTimeout(autoTimer);
+      autoTimer = setTimeout(() => {
+        autoTimer = null;
+        document.getElementById('evalLine').textContent = '…';
+        document.getElementById('bestMove').textContent = '…';
+        document.getElementById('pvLine').textContent = '';
+        analyzePosition(12);
+      }, 150);
+    }
+
     function initStockfish() {
       document.getElementById('engineStatus').textContent = 'Loading engine…';
 
-      // Same-origin path — expects these files in the stockfish/ folder:
-      //   stockfish/stockfish-18-lite-single.js
-      //   stockfish/stockfish-18-lite-single.wasm
       sf = new Worker('stockfish/stockfish-18-lite-single.js');
 
       sf.onerror = (err) => {
@@ -468,7 +478,6 @@
         const msg = e.data;
         if (msg === null || msg === undefined) return;
 
-        // The stockfish.js shim sometimes emits arrays of lines.
         const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
 
         for (const raw of text.split('\n')) {
@@ -481,6 +490,8 @@
             sfReady = true;
             document.getElementById('engineStatus').textContent = 'Engine ready';
             document.getElementById('analyzeBtn').disabled = false;
+            // First evaluation once the engine is up.
+            scheduleAutoAnalyze();
             continue;
           }
 
@@ -535,7 +546,7 @@
       document.getElementById('evalLine').textContent = '…';
       document.getElementById('bestMove').textContent = '…';
       document.getElementById('pvLine').textContent = '';
-      analyzePosition(14);
+      analyzePosition(16);
     };
 
     // ---------- Init ----------
