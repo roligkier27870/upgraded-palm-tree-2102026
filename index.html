@@ -956,12 +956,13 @@
     let chessAfter, chessBefore;
     try {
       chessAfter  = new Chess(fenAfter);
-      chessBefore = new Chess(fenBefore);
+      chessBefore = new Chess(fenBefore);   // <-- stays pristine
     } catch (e) { return false; }
 
     let playedMove;
     try {
-      playedMove = chessBefore.move({
+      const tmp = new Chess(fenBefore);      // <-- separate instance for move reconstruction
+      playedMove = tmp.move({
         from: mv.uci.slice(0, 2),
         to:   mv.uci.slice(2, 4),
         promotion: mv.uci.length > 4 ? mv.uci[4] : undefined
