@@ -920,22 +920,21 @@
   }
 
   // ---------- Brilliant detection ----------
+  // Definition (Option B — user's): any sound sacrifice is Brilliant.
+  // Does NOT require being the engine's #1 move.
+  //
   // Gates, in order:
-  //   A. Not already crushing before the move (pre-eval < +7.0).
-  //   B. Real material sac this move (net >= 1 pawn).
-  //   C. Deep eval (>= depth 16), MultiPV 2.
-  //   D. After the sac, mover is clearly better (>= +1.0).
-  //   E. Eval drop within slack: 50cp per pawn sac'd, cap 300.
-  //   F. Both of opponent's top replies leave mover at >= +0.5.
+  //   A. Real material sac this move (net >= 1 pawn given up).
+  //   B. Deep eval (>= depth 16), MultiPV 2 on the after-position.
+  //   C. Post-sac eval for the mover must be >= 0 (not losing).
+  //   D. The sac must not cost more eval than its size justifies:
+  //      50cp slack per pawn sac'd, capped at 300.
+  //   E. Both of opponent's top replies must leave mover at >= 0.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
     const mv = history[index - 1];
     if (!mv) return false;
 
-    // Gate A — already crushing? Then a sac is showing off, not brilliant.
-    // (Credit: Gemini's suggestion.)
-    if (preCpMover >= 700) return false;
-
-    // Gate B — real material sac.
+    // Gate A — real material sac.
     const matBefore = materialCount(fenBefore);
     const matAfter  = materialCount(fenAfter);
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
@@ -951,21 +950,21 @@
 
     if (netSac < 1) return false;
 
-    // Gate C — deep eval, MultiPV 2.
+    // Gate B — deep eval, MultiPV 2.
     const brilliantDepth = Math.max(depth, 16);
     const post = await requestEval(fenAfter, brilliantDepth, null, 2);
     if (!post || post.cpWhite === null) return false;
 
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
-    // Gate D — sac must leave the mover clearly better, not just equal.
-    if (postCpMover < 100) return false;
+    // Gate C — sac can't leave the mover losing.
+    if (postCpMover < 0) return false;
 
-    // Gate E — slack scales with sac size.
+    // Gate D — slack scales with sac size.
     const slack = Math.min(300, netSac * 50);
     if (postCpMover < preCpMover - slack) return false;
 
-    // Gate F — MultiPV 2: both opponent replies must leave mover >= +0.5.
+    // Gate E — MultiPV 2: both opponent replies must leave mover >= 0.
     if (post.topLines && post.topLines.length > 0) {
       const sign = moverIsWhite ? -1 : 1;
       for (const line of post.topLines) {
@@ -978,10 +977,43 @@
         } else {
           continue;
         }
-        if (sign * cpForOpponent < 50) return false;
+        if (sign * cpForOpponent < 0) return false;
       }
     }
     return true;
+  }
+
+  // ---------- Great-move detection ----------
+  // A move is "Great" if it was the engine's top choice AND the engine's
+  // second-best move is significantly worse. i.e. only one good move existed.
+  async function isOnlyGoodMove(fenBefore, depth) {
+    const multi = await requestEval(fenBefore, depth, null, 2);
+    if (!multi || !multi.topLines || multi.topLines.length < 2) return false;
+
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+
+    const toMoverCp = (line) => {
+      let cpWhite;
+      if (line.mate !== null && line.mate !== undefined) {
+        const sign = (line.mate > 0 ? 1 : -1) * (moverIsWhite ? 1 : -1);
+        cpWhite = sign * (10000 - Math.abs(line.mate) * 10);
+      } else if (line.score !== null && line.score !== undefined) {
+        cpWhite = moverIsWhite ? line.score : -line.score;
+      } else {
+        return null;
+      }
+      return cpWhite;
+    };
+
+    const bestCp   = toMoverCp(multi.topLines[0]);
+    const secondCp = toMoverCp(multi.topLines[1]);
+    if (bestCp === null || secondCp === null) return false;
+
+    // Mate is always unique.
+    if (bestCp >= 9000) return true;
+
+    // Second-best must be materially worse: 1.0 pawn gap.
+    return (bestCp - secondCp) >= 100;
   }
 
   // ---------- Classification ----------
@@ -992,6 +1024,7 @@
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
 
+    // 1. Forced?
     if (isForced(index)) {
       mv.cls = 'forced';
       mv.cpLoss = 0;
@@ -999,6 +1032,7 @@
       return;
     }
 
+    // 2. Theory?
     if (isTheory(index, mv.san)) {
       mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0;
       return;
@@ -1027,16 +1061,17 @@
     mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
     mv.winDrop = winDrop;
 
-    if (playedMatchesBest) {
-      const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
-      if (brilliant) {
-        mv.cls = 'brilliant';
-        return;
-      }
-      mv.cls = winDrop <= 0.005 ? 'best' : 'great';
+    // ---- 3. Brilliant: any sound sacrifice, regardless of whether it
+    //         was the engine's #1 choice. (Option B, user's definition.)
+    //         Runs the sac check first — it's the most expensive and
+    //         most restrictive.
+    const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
+    if (brilliant) {
+      mv.cls = 'brilliant';
       return;
     }
 
+    // ---- 4. Dead-won / dead-lost exemption for non-best moves ----
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
     if (bothWinning || bothLosing) {
@@ -1044,6 +1079,14 @@
       return;
     }
 
+    // ---- 5. Best-move branch: Best or Great ----
+    if (playedMatchesBest) {
+      const great = await isOnlyGoodMove(fenBefore, depth);
+      mv.cls = great ? 'great' : 'best';
+      return;
+    }
+
+    // ---- 6. Everything else: win-probability tiers ----
     mv.cls = classifyWinDrop(winDrop);
   }
 
