@@ -945,8 +945,11 @@
   // ============================================================
   // ---------- Sacrifice detection (chess.js 1.0.0) ------------
   // ============================================================
-  // A sacrifice must be NEW this move. Pieces that were already hanging
-  // before the played move are pre-existing vulnerability, not a sacrifice.
+  // Excluded cases:
+  //   - Move delivers check or checkmate. The opponent's reply is forced,
+  //     so no "hanging piece" is actually takeable that turn.
+  //   - The piece was already hanging before the move. That's pre-existing
+  //     vulnerability, not a new sacrifice.
 
   function isSacrifice(index) {
     const mv = history[index - 1];
@@ -960,6 +963,13 @@
       chessAfter  = new Chess(fenAfter);
       chessBefore = new Chess(fenBefore);
     } catch (e) { return false; }
+
+    // If the move ended the game, there's no follow-up — not a sacrifice.
+    if (chessAfter.isCheckmate()) return false;
+
+    // If the move gives check, the opponent's reply is forced. Any "hanging
+    // piece" in the after-position can't actually be taken this turn.
+    if (chessAfter.isCheck()) return false;
 
     let playedMove;
     try {
@@ -989,15 +999,12 @@
         const attackers = chessAfter.attackers(squareName, oppColor);
         const defenders = chessAfter.attackers(squareName, moverColor);
 
-        // Was this piece already hanging before the move?
-        // (Only meaningful for pieces that didn't move — Case 0 handles those.)
         const beforeAttackers = chessBefore.attackers(squareName, oppColor);
         const beforeDefenders = chessBefore.attackers(squareName, moverColor);
         const wasAlreadyHanging =
           beforeAttackers.length > 0 && beforeDefenders.length === 0;
 
         // Case 0: the piece that just moved is hanging on its new square.
-        // Always a new situation — the piece wasn't on that square before.
         if (playedMove.to === squareName) {
           if (attackers.length > 0 && defenders.length === 0) {
             const capturedVal = captured ? PIECE_VALUES[captured] : 0;
