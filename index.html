@@ -219,12 +219,11 @@
     const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
     // ---------- Board ----------
-    // pieceTheme uses chessboard.js's {piece} token (wK, bQ, etc.)
-    // and expects a file named after it: pieces/wK.png, pieces/bQ.png, ...
+    // Piece PNGs live in the icons/ folder, named wK.png, bQ.png, etc.
     const board = Chessboard('board', {
       draggable: true,
       position: 'start',
-      pieceTheme: '{piece}.png',
+      pieceTheme: 'icons/{piece}.png',
       dropOffBoard: 'snapback',
       onDrop: onDrop,
       onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); }
