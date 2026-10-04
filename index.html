@@ -8,7 +8,7 @@
         href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0/dist/chess.min.js"></script>
 
   <style>
     :root {
@@ -409,19 +409,20 @@
   let cursor = 0;
 
   function onDrop(source, target) {
-    const move = game.move({ from: source, to: target, promotion: 'q' });
-    if (move === null) return 'snapback';
-
-    history = history.slice(0, cursor);
-    history.push({
-      san: move.san,
-      fen: game.fen(),
-      uci: move.from + move.to + (move.promotion || ''),
-      cls: null, cpLoss: null, winDrop: null
-    });
-    cursor = history.length;
-
-    renderAll();
+    try {
+      const move = game.move({ from: source, to: target, promotion: 'q' });
+      history = history.slice(0, cursor);
+      history.push({
+        san: move.san,
+        fen: game.fen(),
+        uci: move.from + move.to + (move.promotion || ''),
+        cls: null, cpLoss: null, winDrop: null
+      });
+      cursor = history.length;
+      renderAll();
+    } catch (e) {
+      return 'snapback';
+    }
   }
 
   function renderBoardOverlay() {
@@ -460,11 +461,11 @@
   function renderStatus() {
     const turn = game.turn() === 'w' ? 'White' : 'Black';
     let msg = turn + ' to move';
-    if (game.in_checkmate()) {
+    if (game.isCheckmate()) {
       msg = 'Checkmate — ' + (game.turn() === 'w' ? 'Black' : 'White') + ' wins';
-    } else if (game.in_draw()) {
+    } else if (game.isDraw()) {
       msg = 'Draw';
-    } else if (game.in_check()) {
+    } else if (game.isCheck()) {
       msg = turn + ' is in check';
     }
     document.getElementById('status').textContent = msg;
@@ -530,7 +531,9 @@
   function gotoPly(n) {
     n = Math.max(0, Math.min(n, history.length));
     game = new Chess();
-    for (let i = 0; i < n; i++) game.move(history[i].san);
+    for (let i = 0; i < n; i++) {
+      try { game.move(history[i].san); } catch (e) { break; }
+    }
     cursor = n;
     renderAll();
   }
@@ -551,14 +554,18 @@
     if (!text) return;
 
     const g = new Chess();
-    try { g.load_pgn(text); }
-    catch (err) { alert('Could not parse PGN: ' + err.message); return; }
+    try {
+      g.loadPgn(text);
+    } catch (err) {
+      alert('Could not parse PGN: ' + err.message);
+      return;
+    }
 
     const replay = new Chess();
     const moves = g.history({ verbose: true });
     const newHistory = [];
     for (const m of moves) {
-      replay.move(m.san);
+      try { replay.move(m.san); } catch (e) { break; }
       newHistory.push({
         san: m.san, fen: replay.fen(),
         uci: m.from + m.to + (m.promotion || ''),
@@ -575,9 +582,13 @@
   document.getElementById('loadFen').onclick = () => {
     const fen = document.getElementById('fenInput').value.trim();
     if (!fen) return;
-    const g = new Chess();
-    try { g.load(fen); } catch (err) { alert('Invalid FEN'); return; }
-    game = g; history = []; cursor = 0;
+    try {
+      game = new Chess(fen);
+    } catch (err) {
+      alert('Invalid FEN');
+      return;
+    }
+    history = []; cursor = 0;
     renderAll();
   };
 
@@ -784,9 +795,12 @@
       const from  = uci.slice(0, 2);
       const to    = uci.slice(2, 4);
       const promo = uci.length > 4 ? uci[4] : undefined;
-      const m = c.move({ from, to, promotion: promo || 'q' });
-      if (!m) break;
-      sans.push(m.san);
+      try {
+        const m = c.move({ from, to, promotion: promo || 'q' });
+        sans.push(m.san);
+      } catch (e) {
+        break;
+      }
     }
     return sans;
   }
@@ -914,137 +928,16 @@
   // ---------- Forced detection ----------
   function isForced(index) {
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
-    const c = new Chess();
-    try { c.load(fenBefore); } catch (e) { return false; }
+    let c;
+    try { c = new Chess(fenBefore); } catch (e) { return false; }
     return c.moves().length === 1;
   }
 
   // ============================================================
-  // ---------- Sacrifice detection (chess.js 0.10.3 compatible)
+  // ---------- Sacrifice detection (chess.js 1.0.0) ------------
   // ============================================================
-  // chess.js 0.10.3 does NOT have `attackers()`. We compute attacker
-  // and defender info by replaying moves with the verbose move list.
+  // Uses chess.js 1.0.0's native attackers() and move.after.
 
-  function makeChess(fen) {
-    const c = new Chess();
-    try { c.load(fen); } catch (e) { /* noop */ }
-    return c;
-  }
-
-  // Given a position and a target square, return the list of `from`
-  // squares whose side is `attackerColor` and that can legally move TO
-  // `targetSquare`. Legal-move filtering handles pins automatically.
-  function getAttackers(chess, targetSquare, attackerColor) {
-    const turn = chess.turn();
-    if (turn !== attackerColor) {
-      // Not that side's move — need to peek. chess.js 0.10.3 can't
-      // easily "generate moves for the other side", so we make a copy
-      // with the turn flipped by inserting the color into the FEN.
-      const fen = chess.fen();
-      const parts = fen.split(' ');
-      parts[1] = attackerColor;
-      // Clear en-passant and halfmove when flipping (safe to be lax here).
-      parts[3] = '-';
-      const flipped = makeChess(parts.join(' '));
-      return flipped.moves({ verbose: true })
-        .filter(m => m.to === targetSquare)
-        .map(m => m.from);
-    }
-    return chess.moves({ verbose: true })
-      .filter(m => m.to === targetSquare)
-      .map(m => m.from);
-  }
-
-  // Defenders of `targetSquare` for `defenderColor`: simulate each
-  // attacker capture, then see if any of defenderColor's pieces can
-  // legally recapture on that square.
-  function getDefenders(chess, targetSquare, defenderColor, attackers) {
-    if (attackers.length === 0) return [];
-
-    const candidates = [];
-    for (const aSq of attackers) {
-      const test = makeChess(chess.fen());
-      // Flip turn to the attacker's color so the move is legal.
-      try {
-        const fenParts = test.fen().split(' ');
-        fenParts[1] = defenderColor === 'w' ? 'b' : 'w';
-        fenParts[3] = '-';
-        test.load(fenParts.join(' '));
-      } catch (e) { continue; }
-
-      try { test.move({ from: aSq, to: targetSquare, promotion: 'q' }); }
-      catch (e) { continue; }
-
-      // Now flip back to defender and see who can recapture on targetSquare.
-      const fenParts = test.fen().split(' ');
-      fenParts[1] = defenderColor;
-      fenParts[3] = '-';
-      const defenderTurn = makeChess(fenParts.join(' '));
-
-      const recaptures = defenderTurn.moves({ verbose: true })
-        .filter(m => m.to === targetSquare)
-        .map(m => m.from);
-
-      for (const rSq of recaptures) {
-        if (!candidates.includes(rSq)) candidates.push(rSq);
-      }
-    }
-    return candidates;
-  }
-
-  // Combined helper returning attackers + defenders for a square.
-  function getAttackersDefenders(chess, color, toSquare) {
-    const oppColor = color === 'w' ? 'b' : 'w';
-
-    const attackerSquares = getAttackers(chess, toSquare, oppColor);
-    const defenderSquares = getDefenders(chess, toSquare, color, attackerSquares);
-
-    const attackerPieces = attackerSquares.map(sq => chess.get(sq));
-    const defenderPieces = defenderSquares.map(sq => chess.get(sq));
-
-    return {
-      attackers: { squares: attackerSquares, pieces: attackerPieces, length: attackerSquares.length },
-      defenders: { squares: defenderSquares, pieces: defenderPieces, length: defenderSquares.length }
-    };
-  }
-
-  // Could the piece on `square` have been saved in this position?
-  // `color` is the color of the piece we're testing (defender's perspective).
-  function couldBeSaved(chess, square, color) {
-    const oppColor = color === 'w' ? 'b' : 'w';
-    const attackers = getAttackers(chess, square, oppColor);
-
-    if (attackers.length === 0) {
-      // Not attacked — no "saving" needed. Any other legal move means
-      // the piece wasn't forced to stay.
-      const moves = chess.moves({ verbose: true });
-      for (const m of moves) {
-        if (m.from !== square) return true;
-      }
-      return false;
-    }
-
-    // It's attacked. Could it move somewhere safe?
-    // Generate its legal moves (need the correct side to move).
-    const turn = chess.turn();
-    let mover = chess;
-    if (turn !== color) {
-      const fenParts = chess.fen().split(' ');
-      fenParts[1] = color;
-      fenParts[3] = '-';
-      mover = makeChess(fenParts.join(' '));
-    }
-
-    const moves = mover.moves({ verbose: true }).filter(m => m.from === square);
-    for (const m of moves) {
-      const after = makeChess(m.after);
-      const stillAttacked = getAttackers(after, m.to, oppColor);
-      if (stillAttacked.length === 0) return true;
-    }
-    return false;
-  }
-
-  // Return true if the move at `index` was a material sacrifice.
   function isSacrifice(index) {
     const mv = history[index - 1];
     if (!mv) return false;
@@ -1052,17 +945,23 @@
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
 
-    const chessAfter  = makeChess(fenAfter);
-    const chessBefore = makeChess(fenBefore);
+    let chessAfter, chessBefore;
+    try {
+      chessAfter  = new Chess(fenAfter);
+      chessBefore = new Chess(fenBefore);
+    } catch (e) { return false; }
 
-    const playedMove = chessBefore.move({
-      from: mv.uci.slice(0, 2),
-      to:   mv.uci.slice(2, 4),
-      promotion: mv.uci.length > 4 ? mv.uci[4] : undefined
-    });
-    if (!playedMove) return false;
+    let playedMove;
+    try {
+      playedMove = chessBefore.move({
+        from: mv.uci.slice(0, 2),
+        to:   mv.uci.slice(2, 4),
+        promotion: mv.uci.length > 4 ? mv.uci[4] : undefined
+      });
+    } catch (e) { return false; }
 
     const moverColor = playedMove.color;
+    const oppColor   = moverColor === 'w' ? 'b' : 'w';
     const captured   = playedMove.captured;
 
     const board = chessAfter.board();
@@ -1074,54 +973,63 @@
         if (sq.color !== moverColor) continue;
         if (sq.type === 'p') continue;
 
-        const { attackers, defenders } =
-          getAttackersDefenders(chessAfter, moverColor, sq.square);
+        const squareName = sq.square;   // 1.0.0 has this
 
-        // Case 0: the piece that just moved is hanging on its new square.
-        if (playedMove.to === sq.square) {
+        const attackers = chessAfter.attackers(squareName, oppColor);
+        const defenders = chessAfter.attackers(squareName, moverColor);
+
+        // Case 0: the piece that just moved is hanging.
+        if (playedMove.to === squareName) {
           if (attackers.length > 0 && defenders.length === 0) {
             const capturedVal = captured ? PIECE_VALUES[captured] : 0;
             const pieceVal = PIECE_VALUES[sq.type];
             if (capturedVal <= pieceVal) {
-              sacrificing.push(sq.square);
+              sacrificing.push(squareName);
               continue;
             }
           }
         }
 
-        // Case 1: undefended and attacked (any piece).
+        // Case 1: undefended and attacked.
         if (defenders.length === 0 && attackers.length > 0) {
           const capturedVal = captured ? PIECE_VALUES[captured] : 0;
           const pieceVal = PIECE_VALUES[sq.type];
           if (capturedVal <= pieceVal) {
-            sacrificing.push(sq.square);
+            sacrificing.push(squareName);
             continue;
           }
         }
 
-        // Case 2: knight or bishop attacked by a pawn.
-        if ((sq.type === 'n' || sq.type === 'b')) {
-          const pawnAttacker = attackers.pieces.find(p => p && p.type === 'p');
-          if (pawnAttacker) { sacrificing.push(sq.square); continue; }
+        // Case 2: knight/bishop attacked by a pawn — only if also undefended.
+        // (ChatGPT flagged: don't flag pawn-attacked pieces if they're defended.)
+        if ((sq.type === 'n' || sq.type === 'b') && defenders.length === 0) {
+          const pawnAttacker = attackers.some(aSq => {
+            const p = chessAfter.get(aSq);
+            return p && p.type === 'p';
+          });
+          if (pawnAttacker) { sacrificing.push(squareName); continue; }
         }
 
         // Case 3: rook hanging.
         if (sq.type === 'r' && attackers.length > 0 &&
             captured !== 'r' && captured !== 'q' &&
             !(attackers.length === 1 &&
-              (attackers.pieces[0]?.type === 'q' || attackers.pieces[0]?.type === 'r') &&
+              (() => { const p = chessAfter.get(attackers[0]); return p && (p.type === 'q' || p.type === 'r'); })() &&
               defenders.length > 0) &&
             !(defenders.length > 0 && (captured === 'n' || captured === 'b'))) {
-          sacrificing.push(sq.square);
+          sacrificing.push(squareName);
           continue;
         }
 
         // Case 4: queen hanging.
         if (sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
-            !(attackers.length === 1 && attackers.pieces[0]?.type === 'q' && defenders.length > 0) &&
-            !(attackers.length === 1 && attackers.pieces[0]?.type === 'r' &&
+            !(attackers.length === 1 &&
+              (() => { const p = chessAfter.get(attackers[0]); return p && p.type === 'q'; })() &&
+              defenders.length > 0) &&
+            !(attackers.length === 1 &&
+              (() => { const p = chessAfter.get(attackers[0]); return p && p.type === 'r'; })() &&
               captured === 'r' && defenders.length > 0)) {
-          sacrificing.push(sq.square);
+          sacrificing.push(squareName);
           continue;
         }
       }
@@ -1137,10 +1045,34 @@
 
       const checkSquare = samePieceOnSquare ? sq : playedMove.from;
 
-      const oppColor = moverColor === 'w' ? 'b' : 'w';
-      if (couldBeSaved(chessBefore, checkSquare, oppColor)) return true;
+      // ChatGPT flagged: use moverColor, not oppColor.
+      if (couldBeSaved(chessBefore, checkSquare, moverColor)) return true;
     }
 
+    return false;
+  }
+
+  // Could the piece on `square` have moved somewhere safe (before the move)?
+  function couldBeSaved(chess, square, color) {
+    const oppColor = color === 'w' ? 'b' : 'w';
+
+    const attackers = chess.attackers(square, oppColor);
+
+    if (attackers.length === 0) {
+      // Not attacked — check if any move by this piece exists.
+      const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
+      return moves.length > 0;
+    }
+
+    // It's attacked. Can it move somewhere safe?
+    const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
+    for (const m of moves) {
+      // 1.0.0 gives us m.after directly.
+      let after;
+      try { after = new Chess(m.after); } catch (e) { continue; }
+      const stillAttacked = after.attackers(m.to, oppColor);
+      if (stillAttacked.length === 0) return true;
+    }
     return false;
   }
 
