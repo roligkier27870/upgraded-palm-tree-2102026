@@ -871,7 +871,7 @@
     return 1 / (1 + Math.exp(-0.00368208 * cp));
   }
 
-  // ---------- Material ----------
+  // ---------- Material count (still used for eval-slack) ----------
   function materialCount(fen) {
     let w = 0, b = 0;
     for (const ch of fen.split(' ')[0]) {
@@ -919,49 +919,216 @@
     return c.moves().length === 1;
   }
 
-  // ---------- Brilliant detection ----------
-  // Definition (Option B — user's): any sound sacrifice is Brilliant.
-  // Does NOT require being the engine's #1 move.
-  //
-  // Gates, in order:
-  //   A. Real material sac this move (net >= 1 pawn given up).
-  //   B. Deep eval (>= depth 16), MultiPV 2 on the after-position.
-  //   C. Post-sac eval for the mover must be >= 0 (not losing).
-  //   D. The sac must not cost more eval than its size justifies:
-  //      50cp slack per pawn sac'd, capped at 300.
-  //   E. Both of opponent's top replies must leave mover at >= 0.
-  async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
+  // ============================================================
+  // ---------- Sacrifice detection (ported from Chesskit) ------
+  // ============================================================
+  // Chess.js 0.10.3 note: `new Chess(fen)` doesn't take a FEN argument.
+  // Use .load(fen) after construction.
+
+  function makeChess(fen) {
+    const c = new Chess();
+    try { c.load(fen); } catch (e) { /* noop */ }
+    return c;
+  }
+
+  // Given a chess.js instance and a square, return attack info for the
+  // piece on that square, from the perspective of `color`.
+  function getAttackersDefenders(chess, color, toSquare) {
+    const oppColor = color === 'w' ? 'b' : 'w';
+
+    // Attacker squares (from the opponent's perspective — pieces attacking `to`)
+    let attackerSquares = [];
+    try { attackerSquares = chess.attackers(toSquare, oppColor) || []; }
+    catch (e) { attackerSquares = []; }
+
+    // Filter to attackers that could actually capture on `to` in this position.
+    const legalMoves = chess.moves({ verbose: true });
+    const legalAttackers = attackerSquares.filter(sq =>
+      legalMoves.some(m => m.from === sq && m.to === toSquare)
+    );
+    const legalAttackerPieces = legalAttackers.map(sq => chess.get(sq));
+
+    // Defenders — our pieces that defend `to`
+    let defenderSquares = [];
+    try { defenderSquares = chess.attackers(toSquare, color) || []; }
+    catch (e) { defenderSquares = []; }
+
+    // A defender only counts if, after one of the attackers captures,
+    // the defender could still recapture on `to`.
+    const legalDefenders = [];
+    for (const dSq of defenderSquares) {
+      let isLegalDefender = true;
+      for (const aSq of legalAttackers) {
+        const test = makeChess(chess.fen());
+        try { test.move({ from: aSq, to: toSquare }); } catch (e) { continue; }
+        const canRecapture = test.moves({ verbose: true })
+          .some(m => m.from === dSq && m.to === toSquare);
+        if (!canRecapture) { isLegalDefender = false; break; }
+      }
+      if (isLegalDefender) legalDefenders.push(dSq);
+    }
+    const legalDefenderPieces = legalDefenders.map(sq => chess.get(sq));
+
+    return {
+      attackers: { squares: legalAttackers, pieces: legalAttackerPieces, length: legalAttackers.length },
+      defenders: { squares: legalDefenders, pieces: legalDefenderPieces, length: legalDefenders.length }
+    };
+  }
+
+  // Could the piece on `square` have been moved away (i.e. was it hanging by choice)?
+  function couldBeSaved(chess, square, color) {
+    // If the piece is not attacked, it wasn't hanging — no "save" needed.
+    let attackers = [];
+    try { attackers = chess.attackers(square, color === 'w' ? 'b' : 'w') || []; }
+    catch (e) { attackers = []; }
+
+    if (attackers.length === 0) {
+      // No attackers — piece wasn't hanging. Whether it could be moved is moot.
+      const moves = chess.moves({ verbose: true });
+      for (const m of moves) {
+        if (m.from !== square) return true;   // other legal moves existed
+      }
+      return false;   // only this piece had moves; not really "savable"
+    }
+
+    // It IS attacked. Could it move somewhere not attacked?
+    const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
+    for (const m of moves) {
+      const test = makeChess(m.after);
+      let stillAttacked = [];
+      try {
+        stillAttacked = test.attackers(m.to, color === 'w' ? 'b' : 'w') || [];
+      } catch (e) { stillAttacked = []; }
+      if (stillAttacked.length === 0) return true;
+    }
+    return false;
+  }
+
+  // Return true if the move at `index` was a material sacrifice.
+  function isSacrifice(index) {
     const mv = history[index - 1];
     if (!mv) return false;
 
-    // Gate A — real material sac.
-    const matBefore = materialCount(fenBefore);
-    const matAfter  = materialCount(fenAfter);
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenAfter  = mv.fen;
 
-    const moverBefore = moverIsWhite ? matBefore.w : matBefore.b;
-    const moverAfter  = moverIsWhite ? matAfter.w  : matAfter.b;
-    const oppBefore   = moverIsWhite ? matBefore.b : matBefore.w;
-    const oppAfter    = moverIsWhite ? matAfter.b  : matAfter.w;
+    const chessAfter  = makeChess(fenAfter);
+    const chessBefore = makeChess(fenBefore);
 
-    const moverLost = moverBefore - moverAfter;
-    const oppLost   = oppBefore - oppAfter;
-    const netSac    = moverLost - oppLost;
+    // Reconstruct the played move to get capture info.
+    const playedMove = chessBefore.move({
+      from: mv.uci.slice(0, 2),
+      to:   mv.uci.slice(2, 4),
+      promotion: mv.uci.length > 4 ? mv.uci[4] : undefined
+    });
+    if (!playedMove) return false;
 
-    if (netSac < 1) return false;
+    const moverColor = playedMove.color;   // 'w' or 'b'
+    const captured   = playedMove.captured; // piece symbol or undefined
 
-    // Gate B — deep eval, MultiPV 2.
+    // Collect candidate sacrificed pieces on the after-position.
+    const board = chessAfter.board();
+    const sacrificing = [];
+
+    for (const row of board) {
+      for (const sq of row) {
+        if (!sq) continue;
+        if (sq.color !== moverColor) continue;
+        if (sq.type === 'p') continue;   // pawns don't count as sacs
+
+        const { attackers, defenders } =
+          getAttackersDefenders(chessAfter, moverColor, sq.square);
+
+        // Case 1: undefended, attacked, and the played move didn't capture
+        // (or only captured a pawn).
+        if (defenders.length === 0 && attackers.length > 0 &&
+            (!captured || captured === 'p')) {
+          sacrificing.push(sq.square);
+          continue;
+        }
+
+        // Case 2: knight or bishop attacked by a pawn, and no capture happened.
+        if ((sq.type === 'n' || sq.type === 'b') && !captured) {
+          const pawnAttacker = attackers.pieces.find(p => p && p.type === 'p');
+          if (pawnAttacker) { sacrificing.push(sq.square); continue; }
+        }
+
+        // Case 3: rook hanging under conditions that count as a sac.
+        if (sq.type === 'r' && attackers.length > 0 &&
+            captured !== 'r' && captured !== 'q' &&
+            !(attackers.length === 1 &&
+              (attackers.pieces[0]?.type === 'q' || attackers.pieces[0]?.type === 'r') &&
+              defenders.length > 0) &&
+            !(defenders.length > 0 && (captured === 'n' || captured === 'b'))) {
+          sacrificing.push(sq.square);
+          continue;
+        }
+
+        // Case 4: queen hanging under conditions that count as a sac.
+        if (sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
+            !(attackers.length === 1 && attackers.pieces[0]?.type === 'q' && defenders.length > 0) &&
+            !(attackers.length === 1 && attackers.pieces[0]?.type === 'r' &&
+              captured === 'r' && defenders.length > 0)) {
+          sacrificing.push(sq.square);
+          continue;
+        }
+      }
+    }
+
+    // For each sacrificed candidate, check whether it could have been saved
+    // in the position before the move. If yes → real sacrifice.
+    for (const sq of sacrificing) {
+      // Was this the piece that just moved? If so, check the "from" square.
+      const afterPiece  = chessAfter.get(sq);
+      const beforePiece = chessBefore.get(sq);
+      const samePieceOnSquare =
+        beforePiece && afterPiece &&
+        beforePiece.color === afterPiece.color &&
+        beforePiece.type  === afterPiece.type;
+
+      const checkSquare = samePieceOnSquare ? sq : playedMove.from;
+
+      const oppColor = moverColor === 'w' ? 'b' : 'w';
+      if (couldBeSaved(chessBefore, checkSquare, oppColor)) return true;
+    }
+
+    return false;
+  }
+
+  // ============================================================
+  // ---------- Brilliant detection -----------------------------
+  // ============================================================
+  // Brilliant = a sound sacrifice. Requires:
+  //   A. isSacrifice(index) is true  — real hanging-piece analysis
+  //   B. Post-sac eval for the mover is >= 0 (not losing)
+  //   C. Sac didn't cost more eval than its size justifies
+  //   D. MultiPV 2 — both opponent replies leave mover >= 0
+  //
+  // Does NOT require being the engine's #1 choice (Option B).
+  async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
+    // Gate A — sacrifice (from Chesskit's attack analysis).
+    if (!isSacrifice(index)) return false;
+
+    // Gate B — deep eval, MultiPV 2 on the position after the move.
     const brilliantDepth = Math.max(depth, 16);
     const post = await requestEval(fenAfter, brilliantDepth, null, 2);
     if (!post || post.cpWhite === null) return false;
 
-    const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
-    // Gate C — sac can't leave the mover losing.
+    // Gate C — post-sac eval must not be losing.
     if (postCpMover < 0) return false;
 
-    // Gate D — slack scales with sac size.
-    const slack = Math.min(300, netSac * 50);
+    // Gate D — eval slack for the sac size.
+    const matBefore = materialCount(fenBefore);
+    const matAfter  = materialCount(fenAfter);
+    const moverLost = (moverIsWhite ? matBefore.w : matBefore.b) -
+                      (moverIsWhite ? matAfter.w  : matAfter.b);
+    const oppLost   = (moverIsWhite ? matBefore.b : matBefore.w) -
+                      (moverIsWhite ? matAfter.b  : matAfter.w);
+    const netSac    = moverLost - oppLost;
+    const slack     = Math.min(300, Math.max(1, netSac) * 50);
     if (postCpMover < preCpMover - slack) return false;
 
     // Gate E — MultiPV 2: both opponent replies must leave mover >= 0.
@@ -984,8 +1151,6 @@
   }
 
   // ---------- Great-move detection ----------
-  // A move is "Great" if it was the engine's top choice AND the engine's
-  // second-best move is significantly worse. i.e. only one good move existed.
   async function isOnlyGoodMove(fenBefore, depth) {
     const multi = await requestEval(fenBefore, depth, null, 2);
     if (!multi || !multi.topLines || multi.topLines.length < 2) return false;
@@ -1009,10 +1174,7 @@
     const secondCp = toMoverCp(multi.topLines[1]);
     if (bestCp === null || secondCp === null) return false;
 
-    // Mate is always unique.
-    if (bestCp >= 9000) return true;
-
-    // Second-best must be materially worse: 1.0 pawn gap.
+    if (bestCp >= 9000) return true;   // mate is always unique
     return (bestCp - secondCp) >= 100;
   }
 
@@ -1024,7 +1186,6 @@
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
 
-    // 1. Forced?
     if (isForced(index)) {
       mv.cls = 'forced';
       mv.cpLoss = 0;
@@ -1032,7 +1193,6 @@
       return;
     }
 
-    // 2. Theory?
     if (isTheory(index, mv.san)) {
       mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0;
       return;
@@ -1061,17 +1221,14 @@
     mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
     mv.winDrop = winDrop;
 
-    // ---- 3. Brilliant: any sound sacrifice, regardless of whether it
-    //         was the engine's #1 choice. (Option B, user's definition.)
-    //         Runs the sac check first — it's the most expensive and
-    //         most restrictive.
+    // 3. Brilliant — any sound sacrifice (Option B).
     const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
     if (brilliant) {
       mv.cls = 'brilliant';
       return;
     }
 
-    // ---- 4. Dead-won / dead-lost exemption for non-best moves ----
+    // 4. Dead-won / dead-lost exemption.
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
     if (bothWinning || bothLosing) {
@@ -1079,14 +1236,14 @@
       return;
     }
 
-    // ---- 5. Best-move branch: Best or Great ----
+    // 5. Best or Great.
     if (playedMatchesBest) {
       const great = await isOnlyGoodMove(fenBefore, depth);
       mv.cls = great ? 'great' : 'best';
       return;
     }
 
-    // ---- 6. Everything else: win-probability tiers ----
+    // 6. Win-probability tiers.
     mv.cls = classifyWinDrop(winDrop);
   }
 
