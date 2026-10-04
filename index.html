@@ -945,6 +945,8 @@
   // ============================================================
   // ---------- Sacrifice detection (chess.js 1.0.0) ------------
   // ============================================================
+  // A sacrifice must be NEW this move. Pieces that were already hanging
+  // before the played move are pre-existing vulnerability, not a sacrifice.
 
   function isSacrifice(index) {
     const mv = history[index - 1];
@@ -987,7 +989,15 @@
         const attackers = chessAfter.attackers(squareName, oppColor);
         const defenders = chessAfter.attackers(squareName, moverColor);
 
-        // Case 0: the piece that just moved is hanging.
+        // Was this piece already hanging before the move?
+        // (Only meaningful for pieces that didn't move — Case 0 handles those.)
+        const beforeAttackers = chessBefore.attackers(squareName, oppColor);
+        const beforeDefenders = chessBefore.attackers(squareName, moverColor);
+        const wasAlreadyHanging =
+          beforeAttackers.length > 0 && beforeDefenders.length === 0;
+
+        // Case 0: the piece that just moved is hanging on its new square.
+        // Always a new situation — the piece wasn't on that square before.
         if (playedMove.to === squareName) {
           if (attackers.length > 0 && defenders.length === 0) {
             const capturedVal = captured ? PIECE_VALUES[captured] : 0;
@@ -999,8 +1009,9 @@
           }
         }
 
-        // Case 1: undefended and attacked.
-        if (defenders.length === 0 && attackers.length > 0) {
+        // Case 1: undefended and attacked — but ONLY if not already hanging.
+        if (!wasAlreadyHanging &&
+            defenders.length === 0 && attackers.length > 0) {
           const capturedVal = captured ? PIECE_VALUES[captured] : 0;
           const pieceVal = PIECE_VALUES[sq.type];
           if (capturedVal <= pieceVal) {
@@ -1009,8 +1020,9 @@
           }
         }
 
-        // Case 2: knight/bishop attacked by a pawn — only if also undefended.
-        if ((sq.type === 'n' || sq.type === 'b') && defenders.length === 0) {
+        // Case 2: knight/bishop attacked by a pawn — same pre-existing check.
+        if (!wasAlreadyHanging &&
+            (sq.type === 'n' || sq.type === 'b') && defenders.length === 0) {
           const pawnAttacker = attackers.some(aSq => {
             const p = chessAfter.get(aSq);
             return p && p.type === 'p';
@@ -1018,8 +1030,9 @@
           if (pawnAttacker) { sacrificing.push(squareName); continue; }
         }
 
-        // Case 3: rook hanging.
-        if (sq.type === 'r' && attackers.length > 0 &&
+        // Case 3: rook hanging (new only).
+        if (!wasAlreadyHanging &&
+            sq.type === 'r' && attackers.length > 0 &&
             captured !== 'r' && captured !== 'q' &&
             !(attackers.length === 1 &&
               (() => { const p = chessAfter.get(attackers[0]); return p && (p.type === 'q' || p.type === 'r'); })() &&
@@ -1029,8 +1042,9 @@
           continue;
         }
 
-        // Case 4: queen hanging.
-        if (sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
+        // Case 4: queen hanging (new only).
+        if (!wasAlreadyHanging &&
+            sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
             !(attackers.length === 1 &&
               (() => { const p = chessAfter.get(attackers[0]); return p && p.type === 'q'; })() &&
               defenders.length > 0) &&
@@ -1082,20 +1096,9 @@
   // ============================================================
   // ---------- Brilliant detection -----------------------------
   // ============================================================
-  // Rules (user's definition):
-  //   1. Must be a real sacrifice. Faux-sacrifices (attacker pinned,
-  //      can't legally capture) are already excluded by chess.js
-  //      1.0.0's attackers() which only returns legal attackers.
-  //   2. Eval after the sac must not be losing for the mover.
-  //   3. Opponent's top replies must not flip the eval.
-  //
-  // No "already winning" gate. A sound sacrifice is a sacrifice,
-  // regardless of whether the position was already favorable.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
-    // Rule 1: real sacrifice.
     if (!isSacrifice(index)) return false;
 
-    // Deep eval for the sac.
     const brilliantDepth = Math.max(depth, 16);
     const post = await requestEval(fenAfter, brilliantDepth, null, 2);
     if (!post || post.cpWhite === null) return false;
@@ -1103,10 +1106,8 @@
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
     const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
-    // Rule 2: not losing after.
     if (postCpMover < 0) return false;
 
-    // Rule 3: opponent's replies must not flip the eval.
     if (post.topLines && post.topLines.length > 0) {
       const sign = moverIsWhite ? -1 : 1;
       for (const line of post.topLines) {
