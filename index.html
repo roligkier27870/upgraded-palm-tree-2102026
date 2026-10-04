@@ -129,6 +129,15 @@
       text-align: center;
       color: #555;
     }
+    #pvLine {
+      font-family: monospace;
+      font-size: 12px;
+      text-align: center;
+      color: #777;
+      margin-top: 4px;
+      min-height: 14px;
+      word-break: break-word;
+    }
     #engineStatus {
       font-size: 11px;
       color: #999;
@@ -153,6 +162,7 @@
         <h3>Engine</h3>
         <div id="evalLine">—</div>
         <div id="bestMove">—</div>
+        <div id="pvLine"></div>
         <div id="engineStatus">Loading engine…</div>
         <div style="margin-top:8px;">
           <button id="analyzeBtn" disabled>Analyze Position</button>
@@ -392,12 +402,59 @@
     let sf = null;
     let sfReady = false;
     let sfResolve = null;
+    let lastPvUci = [];
+
+    // Convert a list of UCI moves into SAN, starting from a given position.
+    function uciLineToSan(startFen, uciMoves) {
+      const c = new Chess();
+      try { c.load(startFen); } catch (e) { return []; }
+
+      const sans = [];
+      for (const uci of uciMoves) {
+        const from  = uci.slice(0, 2);
+        const to    = uci.slice(2, 4);
+        const promo = uci.length > 4 ? uci[4] : undefined;
+
+        const m = c.move({ from, to, promotion: promo || 'q' });
+        if (!m) break;
+        sans.push(m.san);
+      }
+      return sans;
+    }
+
+    // Format a score from Stockfish into a human-friendly string.
+    // Always from White's POV: + = White better, - = Black better.
+    function formatScore(type, val, turn) {
+      if (type === 'cp') {
+        const whiteCp = turn === 'w' ? val : -val;
+        let s = (whiteCp / 100).toFixed(2);
+        if (whiteCp > 0) s = '+' + s;
+        return s;
+      }
+      const whiteMate = turn === 'w' ? val : -val;
+      if (whiteMate > 0) return 'M' + whiteMate;
+      return '-M' + Math.abs(whiteMate);
+    }
+
+    function renderEngineLine() {
+      if (!lastPvUci.length) {
+        document.getElementById('bestMove').textContent = '—';
+        document.getElementById('pvLine').textContent = '';
+        return;
+      }
+      const sans = uciLineToSan(game.fen(), lastPvUci);
+      const best = sans[0] || lastPvUci[0];
+      document.getElementById('bestMove').textContent = 'Best: ' + best;
+
+      const line = sans.slice(1, 6).join(' ');
+      document.getElementById('pvLine').textContent =
+        line ? 'Line: ' + line : '';
+    }
 
     function initStockfish() {
       document.getElementById('engineStatus').textContent = 'Loading engine…';
 
-      // Same-origin path — no CORS, no Blob, no CDN.
-      // Expects these files in the stockfish/ folder of your repo:
+      // Same-origin path — expects these files in the stockfish/ folder:
       //   stockfish/stockfish-18-lite-single.js
       //   stockfish/stockfish-18-lite-single.wasm
       sf = new Worker('stockfish/stockfish-18-lite-single.js');
@@ -408,43 +465,56 @@
       };
 
       sf.onmessage = (e) => {
-        const line = e.data;
+        const msg = e.data;
+        if (msg === null || msg === undefined) return;
 
-        if (line === 'uciok') { sf.postMessage('isready'); return; }
+        // The stockfish.js shim sometimes emits arrays of lines.
+        const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
 
-        if (line === 'readyok') {
-          sfReady = true;
-          document.getElementById('engineStatus').textContent = 'Engine ready';
-          document.getElementById('analyzeBtn').disabled = false;
-          return;
-        }
+        for (const raw of text.split('\n')) {
+          const l = raw.trim();
+          if (!l) continue;
 
-        if (typeof line === 'string' && line.startsWith('info') && line.includes('score')) {
-          const parts = line.split(' ');
-          const scoreIdx = parts.indexOf('score');
-          if (scoreIdx !== -1) {
-            const type = parts[scoreIdx + 1];
-            const val  = parseInt(parts[scoreIdx + 2], 10);
+          if (l === 'uciok') { sf.postMessage('isready'); continue; }
 
-            let text;
-            if (type === 'cp') {
-              const turn = game.turn();
-              const whiteScore = turn === 'w' ? val : -val;
-              text = (whiteScore / 100).toFixed(2);
-              if (whiteScore > 0) text = '+' + text;
-            } else {
-              const turn = game.turn();
-              const whiteMate = turn === 'w' ? val : -val;
-              text = 'M' + Math.abs(whiteMate);
-            }
-            document.getElementById('evalLine').textContent = text;
+          if (l === 'readyok') {
+            sfReady = true;
+            document.getElementById('engineStatus').textContent = 'Engine ready';
+            document.getElementById('analyzeBtn').disabled = false;
+            continue;
           }
-        }
 
-        if (typeof line === 'string' && line.startsWith('bestmove')) {
-          const move = line.split(' ')[1];
-          document.getElementById('bestMove').textContent = 'Best: ' + move;
-          if (sfResolve) { sfResolve(move); sfResolve = null; }
+          if (l.startsWith('info') && l.includes(' score ')) {
+            const parts = l.split(' ');
+
+            const si = parts.indexOf('score');
+            if (si !== -1 && parts[si + 1] && parts[si + 2]) {
+              const type = parts[si + 1];
+              const val  = parseInt(parts[si + 2], 10);
+              if (!isNaN(val)) {
+                document.getElementById('evalLine').textContent =
+                  formatScore(type, val, game.turn());
+              }
+            }
+
+            const pi = parts.indexOf('pv');
+            if (pi !== -1) {
+              lastPvUci = parts.slice(pi + 1)
+                .filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
+              renderEngineLine();
+            }
+            continue;
+          }
+
+          if (l.startsWith('bestmove')) {
+            const move = l.split(' ')[1];
+            if (move && move !== '(none)' && !lastPvUci.length) {
+              lastPvUci = [move];
+              renderEngineLine();
+            }
+            if (sfResolve) { sfResolve(move); sfResolve = null; }
+            continue;
+          }
         }
       };
 
@@ -454,6 +524,7 @@
     function analyzePosition(depth = 14) {
       return new Promise((resolve) => {
         if (!sfReady) { resolve(null); return; }
+        lastPvUci = [];
         sfResolve = resolve;
         sf.postMessage('position fen ' + game.fen());
         sf.postMessage('go depth ' + depth);
@@ -463,6 +534,7 @@
     document.getElementById('analyzeBtn').onclick = () => {
       document.getElementById('evalLine').textContent = '…';
       document.getElementById('bestMove').textContent = '…';
+      document.getElementById('pvLine').textContent = '';
       analyzePosition(14);
     };
 
