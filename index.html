@@ -893,4 +893,180 @@
       ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
       ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],
       ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],
-      ['e4','e5','Nf3','N
+      ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],
+      ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],
+      ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],
+      ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],
+      ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],
+      ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],
+      ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],
+      ['c4','e5','Nc3','Nf6','Nf3','Nc6'],
+      ['Nf3','d5','g3','Nf6','Bg2','e6']
+    ];
+    for (const line of BOOK) {
+      if (moveIndex > line.length) continue;
+      let matches = true;
+      for (let i = 0; i < moveIndex - 1; i++) {
+        if (history[i] && history[i].san !== line[i]) { matches = false; break; }
+      }
+      if (matches && line[moveIndex - 1] === san) return true;
+    }
+    return false;
+  }
+
+  // ---------- Brilliant detection ----------
+  // A move is Brilliant if:
+  //   1. It matched the engine's #1 move in the position BEFORE it was played.
+  //   2. It gave up material (mover net-lost >= 1 pawn vs opponent).
+  //   3. After the move, the eval is still >= 0 from the mover's POV.
+  //   4. The opponent's best TWO replies (MultiPV 2 from the position AFTER
+  //      the move) both leave the eval >= 0 for the mover.
+  //
+  // Step 4 is the "sacrifice holds against best defense" check — it's what
+  // separates a real Brilliant from a desperate lunge.
+  async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
+    const mv = history[index - 1];
+    if (!mv) return false;
+
+    // Sacrifice check: did the mover net-lose material this move?
+    const matBefore = materialCount(fenBefore);
+    const matAfter  = materialCount(fenAfter);
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+
+    const moverBefore = moverIsWhite ? matBefore.w : matBefore.b;
+    const moverAfter  = moverIsWhite ? matAfter.w  : matAfter.b;
+    const oppBefore   = moverIsWhite ? matBefore.b : matBefore.w;
+    const oppAfter    = moverIsWhite ? matAfter.b  : matAfter.w;
+
+    const moverLost = moverBefore - moverAfter;
+    const oppLost   = oppBefore - oppAfter;
+    const netSac    = moverLost - oppLost;   // positive = we gave up material
+
+    if (netSac < 1) return false;              // need at least 1 pawn net sac
+    if (preCpMover < 0) return false;          // were already losing before
+
+    // MultiPV 2 from the position AFTER the move. This asks:
+    // "against the opponent's two best replies, does the sac hold?"
+    const post = await requestEval(fenAfter, depth, null, 2);
+    if (!post || !post.topLines || post.topLines.length === 0) return false;
+
+    const turn = fenAfter.split(' ')[1];       // opponent to move
+    const sign = moverIsWhite ? -1 : 1;         // convert opponent POV → mover
+
+    for (const line of post.topLines.slice(0, 2)) {
+      let cpForOpponent;
+      if (line.mate !== null && line.mate !== undefined) {
+        cpForOpponent = (line.mate > 0 ? 1 : -1) * (10000 - Math.abs(line.mate) * 10);
+      } else if (line.score !== null && line.score !== undefined) {
+        cpForOpponent = line.score;
+      } else {
+        continue;
+      }
+      const cpForMover = sign * cpForOpponent;
+      if (cpForMover < 0) return false;        // best defense wins for opponent
+    }
+    return true;
+  }
+
+  // ---------- Classification ----------
+  async function classifyMove(index, depth = 10) {
+    const mv = history[index - 1];
+    if (!mv) return;
+
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenAfter  = mv.fen;
+
+    if (isTheory(index, mv.san)) {
+      mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0;
+      return;
+    }
+
+    const pre = await requestEval(fenBefore, depth, null, 1);
+    if (!pre || pre.cpWhite === null) return;
+
+    const playedMatchesBest =
+      pre.bestUci && pre.bestUci !== '(none)' &&
+      mv.uci.startsWith(pre.bestUci.slice(0, 4)) &&
+      (mv.uci.length === 4 || mv.uci[4] === pre.bestUci[4]);
+
+    const post = await requestEval(fenAfter, depth, null, 1);
+    if (!post || post.cpWhite === null) return;
+
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
+    const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
+
+    const clamp = v => Math.max(-1000, Math.min(1000, v));
+    const preWin  = cpToWinProb(clamp(preCpMover));
+    const postWin = cpToWinProb(clamp(postCpMover));
+    const winDrop = Math.max(0, preWin - postWin);
+
+    mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
+    mv.winDrop = winDrop;
+
+    // Dead-won / dead-lost exemption
+    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
+    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
+    if (bothWinning || bothLosing) {
+      mv.cls = winDrop <= 0.005 ? 'best' : 'good';
+      return;
+    }
+
+    // ---- Brilliant check ----
+    // Only try the expensive check if the played move was the best one.
+    if (playedMatchesBest) {
+      const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
+      if (brilliant) {
+        mv.cls = 'brilliant';
+        return;
+      }
+      mv.cls = winDrop <= 0.005 ? 'best' : 'great';
+      return;
+    }
+
+    mv.cls = classifyWinDrop(winDrop);
+  }
+
+  function classifyWinDrop(winDrop) {
+    const pp = winDrop * 100;
+    if (pp <= 0.5)  return 'best';
+    if (pp <= 1.5)  return 'excellent';
+    if (pp <= 3.5)  return 'good';
+    if (pp <= 7)    return 'inaccuracy';
+    if (pp <= 14)   return 'mistake';
+    return 'blunder';
+  }
+
+  // ---------- Analyze Full Game ----------
+  document.getElementById('analyzeAllBtn').onclick = async () => {
+    if (analyzingAll || !sfReady || history.length === 0) return;
+
+    analyzingAll = true;
+    document.getElementById('analyzeAllBtn').disabled = true;
+    const depth = 10;
+
+    for (let i = 1; i <= history.length; i++) {
+      document.getElementById('analyzeAllStatus').textContent =
+        `Analyzing move ${i} / ${history.length}…`;
+      await classifyMove(i, depth);
+      renderMoves();
+      renderBoardOverlay();
+      renderNavButtons();
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    analyzingAll = false;
+    document.getElementById('analyzeAllBtn').disabled = false;
+    document.getElementById('analyzeAllStatus').textContent = 'Done.';
+    renderMoves();
+    renderBoardOverlay();
+  };
+
+  window.addEventListener('resize', () => renderBoardOverlay());
+
+  renderAll();
+  initStockfish();
+</script>
+
+</body>
+</html>
