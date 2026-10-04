@@ -8,7 +8,13 @@
         href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0/dist/cjs/chess.js"></script>
+
+  <!-- chess.js 1.0.0 loads as an ES module and exposes `Chess` globally -->
+  <script type="module">
+    import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.0.0/+esm';
+    window.Chess = Chess;
+    window.dispatchEvent(new Event('chessjs-ready'));
+  </script>
 
   <style>
     :root {
@@ -392,6 +398,9 @@
 </div>
 
 <script>
+  // Everything runs after chess.js has been loaded and `Chess` is global.
+  window.addEventListener('chessjs-ready', () => {
+
   const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
@@ -936,7 +945,6 @@
   // ============================================================
   // ---------- Sacrifice detection (chess.js 1.0.0) ------------
   // ============================================================
-  // Uses chess.js 1.0.0's native attackers() and move.after.
 
   function isSacrifice(index) {
     const mv = history[index - 1];
@@ -973,7 +981,7 @@
         if (sq.color !== moverColor) continue;
         if (sq.type === 'p') continue;
 
-        const squareName = sq.square;   // 1.0.0 has this
+        const squareName = sq.square;
 
         const attackers = chessAfter.attackers(squareName, oppColor);
         const defenders = chessAfter.attackers(squareName, moverColor);
@@ -1001,7 +1009,6 @@
         }
 
         // Case 2: knight/bishop attacked by a pawn — only if also undefended.
-        // (ChatGPT flagged: don't flag pawn-attacked pieces if they're defended.)
         if ((sq.type === 'n' || sq.type === 'b') && defenders.length === 0) {
           const pawnAttacker = attackers.some(aSq => {
             const p = chessAfter.get(aSq);
@@ -1045,29 +1052,24 @@
 
       const checkSquare = samePieceOnSquare ? sq : playedMove.from;
 
-      // ChatGPT flagged: use moverColor, not oppColor.
       if (couldBeSaved(chessBefore, checkSquare, moverColor)) return true;
     }
 
     return false;
   }
 
-  // Could the piece on `square` have moved somewhere safe (before the move)?
   function couldBeSaved(chess, square, color) {
     const oppColor = color === 'w' ? 'b' : 'w';
 
     const attackers = chess.attackers(square, oppColor);
 
     if (attackers.length === 0) {
-      // Not attacked — check if any move by this piece exists.
       const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
       return moves.length > 0;
     }
 
-    // It's attacked. Can it move somewhere safe?
     const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
     for (const m of moves) {
-      // 1.0.0 gives us m.after directly.
       let after;
       try { after = new Chess(m.after); } catch (e) { continue; }
       const stillAttacked = after.attackers(m.to, oppColor);
@@ -1119,7 +1121,6 @@
     return true;
   }
 
-  // ---------- Great-move detection ----------
   async function isOnlyGoodMove(fenBefore, depth) {
     const multi = await requestEval(fenBefore, depth, null, 2);
     if (!multi || !multi.topLines || multi.topLines.length < 2) return false;
@@ -1147,7 +1148,6 @@
     return (bestCp - secondCp) >= 100;
   }
 
-  // ---------- Classification ----------
   async function classifyMove(index, depth = 14) {
     const mv = history[index - 1];
     if (!mv) return;
@@ -1222,7 +1222,6 @@
     return 'blunder';
   }
 
-  // ---------- Analyze Full Game ----------
   document.getElementById('analyzeAllBtn').onclick = async () => {
     if (analyzingAll || !sfReady || history.length === 0) return;
 
@@ -1251,6 +1250,8 @@
 
   renderAll();
   initStockfish();
+
+  }); // end chessjs-ready
 </script>
 
 </body>
