@@ -35,7 +35,6 @@
       pointer-events: none;
       z-index: 10;
     }
-    /* Board badge: ~40% of an 80px square = 32px */
     #board-overlay .sq-badge {
       position: absolute;
       width: 32px;
@@ -122,7 +121,6 @@
     #moves .mv:hover { background: #eef; }
     #moves .mv.current { background: #cde; font-weight: bold; }
 
-    /* Move-list badge: 20px so it reads clearly */
     #moves .mv .badge {
       display: inline-block;
       width: 20px;
@@ -253,8 +251,7 @@
     }
 
     // ---------- Board overlay ----------
-    // Board badge goes into the top-RIGHT corner of the destination square,
-    // matching chess.com's placement. 32px on an 80px square.
+    // Badge hugs the top-right corner of the destination square.
     function renderBoardOverlay() {
       const overlay = document.getElementById('board-overlay');
       if (!overlay) return;
@@ -276,9 +273,9 @@
       const rankIdx = 8 - parseInt(rank, 10);
 
       const badgeSize = 32;
-      // Anchor: right edge of the square, minus a small margin.
-      const x = fileIdx * sq + sq - badgeSize - 4;
-      const y = rankIdx * sq + 4;
+      // Anchored exactly at the top-right corner of the square.
+      const x = fileIdx * sq + sq - badgeSize;
+      const y = rankIdx * sq;
 
       const badge = document.createElement('div');
       badge.className = 'sq-badge cls-' + mv.cls;
