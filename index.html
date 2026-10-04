@@ -920,13 +920,14 @@
   }
 
   // ---------- Brilliant detection ----------
-  // A move is Brilliant if ALL of these are true:
+  // A move is Brilliant if:
   //   1. It was the engine's top choice in the position before it was played.
   //   2. It gave up material (net sac >= 1 pawn).
-  //   3. After the move, the eval is NOT worse than before (within slack).
-  //   4. After the move, the mover is still at least equal.
-  //   5. Against the opponent's top TWO replies (MultiPV 2), the mover is
-  //      still not losing.
+  //   3. After the move, the mover is still winning or equal.
+  //   4. The eval drop is within a slack that scales with the sac size
+  //      (a queen sac can afford a bigger temporary dip than a pawn sac).
+  //   5. Against the opponent's top TWO replies, the mover is not losing.
+  // The check runs at deeper depth (>= 16) so mating nets get seen.
   async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
     const mv = history[index - 1];
     if (!mv) return false;
@@ -947,16 +948,21 @@
 
     if (netSac < 1) return false;
 
-    // 2. Eval after the sac — must not be worse than before.
-    const post = await requestEval(fenAfter, depth, null, 2);
+    // 2. Deeper eval than classification depth — brilliancy needs vision.
+    const brilliantDepth = Math.max(depth, 16);
+    const post = await requestEval(fenAfter, brilliantDepth, null, 2);
     if (!post || post.cpWhite === null) return false;
 
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
 
-    if (postCpMover < preCpMover - 30) return false;   // sac lost ground
-    if (postCpMover < 0) return false;                 // sac left us losing
+    // 3. Still must be winning or equal after the sac.
+    if (postCpMover < 0) return false;
 
-    // 3. MultiPV 2 — both opponent replies must not favor them.
+    // 4. Eval drop allowed scales with sac size: 50cp per pawn sac'd, cap 300.
+    const slack = Math.min(300, netSac * 50);
+    if (postCpMover < preCpMover - slack) return false;
+
+    // 5. MultiPV 2 — opponent's replies must not flip the game.
     if (post.topLines && post.topLines.length > 0) {
       const sign = moverIsWhite ? -1 : 1;
       for (const line of post.topLines) {
@@ -976,7 +982,7 @@
   }
 
   // ---------- Classification ----------
-  async function classifyMove(index, depth = 10) {
+  async function classifyMove(index, depth = 14) {
     const mv = history[index - 1];
     if (!mv) return;
 
@@ -1058,7 +1064,7 @@
 
     analyzingAll = true;
     document.getElementById('analyzeAllBtn').disabled = true;
-    const depth = 10;
+    const depth = 14;   // bumped from 10 — tactically deeper for brilliancies
 
     for (let i = 1; i <= history.length; i++) {
       document.getElementById('analyzeAllStatus').textContent =
