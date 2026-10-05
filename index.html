@@ -271,19 +271,22 @@
       z-index: 5;
     }
     /* The white portion — anchored to the TOP, height = White's share */
+    /* White portion — anchored to the BOTTOM. Height = White's share of the bar. */
     .eval-bar .eval-fill {
       position: absolute;
       left: 0;
-      top: 0;
+      bottom: 0;
       width: 100%;
       height: 50%;
-      background: linear-gradient(to bottom, #ffffff, #e6e9ee, #cdd2dd);
+      background: linear-gradient(to top, #ffffff, #f5f6f8, #e6e9ee);
       transition: height 0.35s ease;
+      z-index: 2;
     }
-    .eval-bar .eval-fill::after {
+    /* Subtle accent line at the boundary between white and black. */
+    .eval-bar .eval-fill::before {
       content: "";
       position: absolute;
-      bottom: 0;
+      top: 0;
       left: 0;
       width: 100%;
       height: 2px;
@@ -1428,18 +1431,21 @@ window.addEventListener('chessjs-ready', () => {
           }
           document.getElementById('engineDepthChip').textContent = depth !== null ? depth : '—';
 
-          // Eval bar — White fills from TOP, height = White's share (0%..100%)
+          // Eval bar — White anchored at bottom. Height = White's share (0..100).
           let whiteSharePct = 50;
-          if (score !== null) {
-            const cpWhite = turn === 'w' ? score : -score;
-            const clamped = Math.max(-1000, Math.min(1000, cpWhite));
-            whiteSharePct = 50 - (clamped / 1000) * 45; // 5..95
-          } else if (mate !== null) {
+          if (mate !== null && mate !== undefined) {
+            // Mate: bar becomes fully the winner's colour.
             const whiteMate = turn === 'w' ? mate : -mate;
-            whiteSharePct = whiteMate > 0 ? 98 : 2;
+            whiteSharePct = whiteMate > 0 ? 100 : 0;
+          } else if (score !== null) {
+            const cpWhite = turn === 'w' ? score : -score;
+            // Map [-2000..+2000] cp to [0..100]%. Wider range so +10
+            // pawns essentially fills the bar, matching the diagram.
+            const clamped = Math.max(-2000, Math.min(2000, cpWhite));
+            whiteSharePct = 50 + (clamped / 2000) * 50;
           }
           document.getElementById('evalFill').style.height = whiteSharePct + '%';
-
+          
           if (score !== null) {
             const s = formatScore('cp', score, turn);
             const tag = document.getElementById('evalScoreTag');
