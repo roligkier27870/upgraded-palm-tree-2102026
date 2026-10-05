@@ -267,6 +267,7 @@
     .cls-mistake    { background-image: url('icons/Mistake.png'); }
     .cls-blunder    { background-image: url('icons/Blunder.png'); }
     .cls-forced     { background-image: url('icons/Forced.png'); }
+    .cls-miss       { background-image: url('icons/Miss.png'); }
 
     .controls {
       display: grid;
@@ -646,7 +647,6 @@ window.addEventListener('chessjs-ready', () => {
           sfReady = true;
           document.getElementById('engineStatus').textContent = 'Engine ready';
           document.getElementById('statusDot').textContent = 'Engine ready';
-          document.getElementById('analyzeBtn').disabled = false;
           renderNavButtons();
           scheduleAutoAnalyze();
           continue;
@@ -693,12 +693,12 @@ window.addEventListener('chessjs-ready', () => {
           else if (mate !== null) evalText = formatScore('mate', mate, turn);
           document.getElementById('evalLine').textContent = evalText;
 
-          // Update eval bar (White-positive, percentage from bottom)
           const cpWhite = score !== null ? (turn === 'w' ? score : -score) : null;
           if (cpWhite !== null) {
             const clamped = Math.max(-1000, Math.min(1000, cpWhite));
-            const pct = 50 - (clamped / 1000) * 45;  // 5% to 95%
+            const pct = 50 - (clamped / 1000) * 45;
             document.getElementById('evalfill').style.height = pct + '%';
+            document.getElementById('meter').style.width = (100 - pct) + '%';
           }
         }
       }
@@ -1013,6 +1013,25 @@ window.addEventListener('chessjs-ready', () => {
     return (bestCp - secondCp) >= 100;
   }
 
+  // ---------- Miss detection ----------
+  // A Miss = the mover had a winning position, played a non-best move,
+  // and gave most of the advantage back. The engine's best move was
+  // clearly better than what was played.
+  //
+  // Conditions:
+  //   - Position before was winning for the mover (eval >= +2.0 / mate)
+  //   - Played move was NOT the engine's top choice
+  //   - Position after is no longer winning (eval < +1.0)
+  //
+  // Excluded: moves that were already forced, theory, or Brilliant.
+  function isMiss(playedMatchesBest, preCpMover, postCpMover) {
+    if (playedMatchesBest) return false;
+    const wasWinning = preCpMover >= 200 || preCpMover >= 9000;
+    if (!wasWinning) return false;
+    const lostTheWin = postCpMover < 100 && postCpMover < preCpMover - 150;
+    return lostTheWin;
+  }
+
   async function classifyMove(index, depth = 14) {
     const mv = history[index - 1];
     if (!mv) return;
@@ -1042,6 +1061,11 @@ window.addEventListener('chessjs-ready', () => {
 
     const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
     if (brilliant) { mv.cls = 'brilliant'; return; }
+
+    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) {
+      mv.cls = 'miss';
+      return;
+    }
 
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
@@ -1107,7 +1131,7 @@ Position after (FEN): ${fenAfter}
 Eval before (mover POV, centipawns): ${mv.evalBefore ?? 'unknown'}
 Eval after (mover POV, centipawns): ${mv.evalAfter ?? 'unknown'}
 
-Explain in plain English why this move was classified as ${mv.cls || 'unclassified'}. If it's Brilliant, explain what the sacrifice accomplishes. If it's a mistake or blunder, explain what was given up. Keep it under 3 sentences. No markdown.`;
+Explain in plain English why this move was classified as ${mv.cls || 'unclassified'}. If it's Brilliant, explain what the sacrifice accomplishes. If it's a Miss, explain what winning opportunity was overlooked. If it's a mistake or blunder, explain what was given up. Keep it under 3 sentences. No markdown.`;
 
     try {
       const res = await fetch(PROXY_URL, {
@@ -1145,13 +1169,13 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
   renderAll();
   initStockfish();
 
-  // Debug exports
   window.getGame = () => game;
   window.getHistory = () => history;
   window.isSacrifice = isSacrifice;
   window.couldBeSaved = couldBeSaved;
   window.classifyMove = classifyMove;
   window.isBrilliant = isBrilliant;
+  window.isMiss = isMiss;
   window.materialCount = materialCount;
 
 });
