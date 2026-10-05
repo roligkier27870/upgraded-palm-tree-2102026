@@ -279,6 +279,9 @@
       align-items: stretch;
       border: 1px solid rgba(60,74,66,0.25);
       box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+      max-width: 700px;
+      margin: 0 auto;
+      width: 100%;
     }
 
     /* Eval bar */
@@ -346,7 +349,8 @@
       position: relative;
       flex: 1;
       aspect-ratio: 1 / 1;
-      max-width: 100%;
+      max-width: 620px;
+      max-height: 620px;
       border-radius: 8px;
       overflow: hidden;
       background: var(--surface-container);
@@ -362,8 +366,8 @@
     }
     #board-overlay .sq-badge {
       position: absolute;
-      width: 34px;
-      height: 34px;
+      width: 48px;
+      height: 48px;
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
@@ -907,7 +911,7 @@ window.addEventListener('chessjs-ready', () => {
 
     const size = overlay.parentElement.clientWidth;
     const sq = size / 8;
-    const badgeSize = 34;
+    const badgeSize = 48;
 
     const badge = document.createElement('div');
     badge.className = 'sq-badge cls-' + mv.cls;
