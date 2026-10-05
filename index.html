@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chess Analyzer</title>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+
   <link rel="stylesheet"
         href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -18,104 +22,338 @@
 
   <style>
     * { box-sizing: border-box; }
+
     :root {
-      --bg: #111318;
-      --panel: #191c22;
-      --panel-2: #20242c;
+      /* Palette from the Stitch mockup */
+      --bg: #0f131c;
+      --surface: #0f131c;
+      --surface-low: #181c24;
+      --surface-container: #1c2028;
+      --surface-high: #262a33;
+      --surface-highest: #31353e;
+      --surface-lowest: #0a0e16;
       --line: #2c313b;
-      --text: #e8eaf0;
-      --muted: #8d94a2;
-      --green: #78d49b;
-      --green-dark: #315b43;
-      --blue: #6aa8ff;
-      --red: #e88f8f;
-      --light: #f0d9b5;
-      --dark: #b58863;
+      --outline: #3c4a42;
+      --outline-variant: #3c4a42;
+
+      --text: #dfe2ee;
+      --text-variant: #bbcabf;
+      --muted: #86948a;
+
+      --primary: #4edea3;
+      --primary-container: #10b981;
+      --on-primary: #003824;
+      --on-primary-container: #00422b;
+
+      --secondary: #4cd7f6;
+      --tertiary: #ffb95f;
+      --tertiary-container: #e29100;
+      --error: #ffb4ab;
+      --error-container: #93000a;
+
+      --board-light: #f0d9b5;
+      --board-dark: #b58863;
+
+      --font-body: 'Outfit', system-ui, sans-serif;
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
     }
-    html, body { height: 100%; margin: 0; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+    }
     body {
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: var(--font-body);
       background:
-        radial-gradient(circle at 15% 0%, #20242e 0, transparent 30%),
-        linear-gradient(135deg, #101217, #0d0f13 70%);
+        radial-gradient(circle at 15% 0%, #20242e 0, transparent 35%),
+        linear-gradient(135deg, #101217, #0a0e16 70%);
       color: var(--text);
+      font-size: 14px;
+      line-height: 1.45;
+      min-height: 100vh;
+      overscroll-behavior: none;
     }
+
+    /* ---------- App shell ---------- */
     .app {
       min-height: 100vh;
       display: grid;
-      grid-template-columns: minmax(600px, 1fr) 440px;
+      grid-template-columns: minmax(560px, 1fr) 460px;
+      max-width: 1780px;
+      margin: 0 auto;
+      width: 100%;
     }
+
     .main {
       min-width: 0;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      padding: 24px 28px;
+      padding: 20px 24px 24px;
+      gap: 10px;
     }
+
+    /* ---------- Topbar ---------- */
     .topbar {
-      width: 100%;
-      max-width: 900px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 16px;
+      gap: 14px;
+      padding: 8px 4px;
+      flex-wrap: wrap;
     }
     .brand {
       display: flex;
       align-items: center;
-      gap: 11px;
+      gap: 10px;
+      font-family: var(--font-display);
       font-weight: 700;
-      letter-spacing: .2px;
+      font-size: 15px;
+      letter-spacing: -0.2px;
     }
-    .logo {
-      width: 34px; height: 34px;
+    .brand .logo {
+      width: 32px; height: 32px;
       display: grid; place-items: center;
-      border-radius: 9px;
-      background: #272c35;
+      border-radius: 8px;
+      background: var(--surface-high);
       box-shadow: inset 0 1px 0 #3a404c;
-      font-size: 20px;
+      font-size: 18px;
     }
-    .status {
-      color: var(--muted);
-      font-size: 12px;
+    .brand .accent { color: var(--primary); }
+
+    .engine-chip {
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 10px;
+      background: var(--surface-lowest);
+      border: 1px solid rgba(76,215,246,0.25);
+      padding: 5px 12px;
+      border-radius: 999px;
+      box-shadow: 0 0 12px -2px rgba(76,215,246,0.15);
+      font-family: var(--font-mono);
+      font-size: 11px;
     }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px #78d49b88; }
+    .engine-chip .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--secondary);
+      box-shadow: 0 0 8px rgba(76,215,246,0.6);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .engine-chip .sep { color: var(--outline); }
+    .engine-chip .val-primary { color: var(--primary); font-weight: 600; }
+    .engine-chip .val-secondary { color: var(--secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
 
-    .board-row {
+    /* ---------- Player strips ---------- */
+    .player-strip {
       display: flex;
-      gap: 14px;
-      align-items: stretch;
-      width: 100%;
-      max-width: 900px;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(28,32,40,0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(60,74,66,0.3);
+      border-radius: 10px;
+      padding: 8px 14px;
+      gap: 12px;
     }
-    .evalbar-wrap {
-      width: 16px;
-      border-radius: 4px;
-      background: #e7e7e7;
-      position: relative;
-      overflow: hidden;
+    .player-strip.active {
+      border-color: rgba(78,222,163,0.4);
+      box-shadow: 0 0 0 1px rgba(78,222,163,0.15);
+    }
+    .player-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+    .player-avatar {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      background: var(--surface-high);
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      color: var(--text);
       flex-shrink: 0;
-      align-self: stretch;
     }
-    .evalfill {
+    .player-avatar.light {
+      background: #f1f1ee;
+      color: #1a1a1a;
+    }
+    .player-avatar.dark {
+      background: #1c1c1c;
+      color: #f1f1ee;
+    }
+    .player-names { min-width: 0; }
+    .player-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .player-name {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+    .player-elo {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--surface-highest);
+      color: var(--text-variant);
+    }
+    .player-country {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--outline);
+    }
+    .player-captured {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      line-height: 1;
+      color: var(--text);
+      letter-spacing: -2px;
+    }
+    .captured-adv {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 0;
+    }
+    .captured-adv.pos {
+      color: var(--primary);
+      background: rgba(78,222,163,0.1);
+    }
+    .captured-adv.neg {
+      color: var(--error);
+      background: rgba(255,180,171,0.1);
+    }
+    .player-timer {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-lowest);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(60,74,66,0.4);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-variant);
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+    .player-strip.active .player-timer {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      border-color: transparent;
+    }
+
+    /* ---------- Board wrapper ---------- */
+    .board-shell {
+      position: relative;
+      background: rgba(28,32,40,0.7);
+      backdrop-filter: blur(12px);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+      border: 1px solid rgba(60,74,66,0.25);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+    }
+
+    /* Eval bar */
+    .eval-bar {
+      width: 34px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface-highest);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      flex-shrink: 0;
+      border: 1px solid rgba(60,74,66,0.3);
+      box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);
+    }
+    .eval-bar .depth-tag {
+      width: 100%;
+      text-align: center;
+      padding: 4px 0;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      background: rgba(10,14,22,0.85);
+      color: var(--outline);
+      z-index: 5;
+    }
+    .eval-bar .eval-fill {
       position: absolute;
-      left: 0; bottom: 0;
+      left: 0;
+      bottom: 0;
       width: 100%;
       height: 50%;
-      background: #292b30;
-      transition: height .4s ease;
+      background: linear-gradient(to top, #ffffff, #e6e9ee, #cdd2dd);
+      transition: height 0.4s ease;
     }
+    .eval-bar .eval-fill::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background: var(--primary);
+      box-shadow: 0 0 8px var(--primary);
+    }
+    .eval-bar .score-tag {
+      width: 100%;
+      text-align: center;
+      padding: 4px 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.95);
+      color: #0a0e16;
+      z-index: 5;
+    }
+    .eval-bar .score-tag.neg {
+      background: #0a0e16;
+      color: #e6e9ee;
+    }
+
+    /* Board */
     .board-wrap {
       position: relative;
       flex: 1;
-      aspect-ratio: 1;
+      aspect-ratio: 1 / 1;
       max-width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface-container);
+      border: 1px solid rgba(60,74,66,0.3);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
     #board { width: 100%; }
-
     #board-overlay {
       position: absolute;
       inset: 0;
@@ -124,133 +362,267 @@
     }
     #board-overlay .sq-badge {
       position: absolute;
-      width: 38px; height: 38px;
+      width: 34px;
+      height: 34px;
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+    }
+    #arrow-svg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9;
     }
 
-    #status {
-      text-align: center;
-      font-size: 15px;
-      min-height: 22px;
-      margin-top: 12px;
-      color: var(--text);
-    }
-    .nav {
+    /* ---------- Playback dock ---------- */
+    .playback {
+      background: rgba(24,28,36,0.85);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 10px 14px;
       display: flex;
-      gap: 8px;
-      justify-content: center;
-      margin-top: 10px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid rgba(60,74,66,0.2);
+      flex-wrap: wrap;
     }
-    .nav button { min-width: 52px; font-size: 18px; }
-    #fen {
-      font-family: ui-monospace, monospace;
+    .playback-buttons {
+      display: flex;
+      gap: 6px;
+    }
+    .btn {
+      appearance: none;
+      border: 1px solid rgba(60,74,66,0.3);
+      background: var(--surface-high);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 500;
+      transition: background 0.15s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover:not(:disabled) { background: var(--surface-highest); }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.35; cursor: default; }
+    .btn.icon-btn {
+      min-width: 36px;
+      justify-content: center;
+      padding: 7px 10px;
+      font-size: 16px;
+    }
+    .btn.primary {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      border-color: transparent;
+      font-weight: 600;
+    }
+    .btn.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--primary-container); }
+    .btn.full { width: 100%; justify-content: center; }
+
+    .fen-inline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
       font-size: 11px;
-      color: var(--muted);
-      word-break: break-all;
-      text-align: center;
-      max-width: 100%;
-      margin-top: 8px;
+      color: var(--text-variant);
+      min-width: 0;
+      flex: 1;
+    }
+    .fen-inline .label { color: var(--outline); }
+    .fen-inline .value {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 320px;
     }
 
+    /* ---------- Status line ---------- */
+    .status-line {
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-variant);
+      min-height: 18px;
+    }
+
+    /* ---------- Sidebar ---------- */
     .sidebar {
-      background: rgba(22,25,31,.96);
+      background: rgba(15,19,28,0.9);
       border-left: 1px solid var(--line);
       display: flex;
       flex-direction: column;
-      min-height: 0;
+      gap: 10px;
+      padding: 20px 20px 20px 0;
       overflow-y: auto;
     }
-    .side-head {
-      padding: 20px 22px 16px;
-      border-bottom: 1px solid var(--line);
+
+    .card {
+      background: rgba(28,32,40,0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(60,74,66,0.25);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
     }
-    .title-row { display:flex; justify-content:space-between; align-items:center; }
-    h1 { font-size: 16px; margin: 0; }
-    .gear { color: var(--muted); font-size: 18px; cursor:pointer; background: none; border: none; padding: 0; }
-    .eval {
-      margin-top: 14px;
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      gap: 8px;
+    }
+    .card-title {
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.2px;
+    }
+    .card-meta {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--outline);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Eval card */
+    .eval-rows { display: flex; flex-direction: column; gap: 6px; }
+    .eval-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 12px;
+    }
+    .eval-row .k { color: var(--text-variant); }
+    .eval-row .v {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text);
+    }
+    .eval-row .v.big {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--primary);
+      letter-spacing: -0.5px;
+    }
+    .eval-row .v.big.neg { color: var(--error); }
+    .eval-row .v.accent { color: var(--primary); }
+
+    /* Top 3 lines */
+    .pv-list { display: flex; flex-direction: column; gap: 6px; }
+    .pv-line {
       display: flex;
       align-items: baseline;
-      gap: 12px;
-    }
-    .score { font-size: 30px; font-weight: 750; letter-spacing: -.7px; }
-    .depth { color: var(--muted); font-size: 12px; }
-    .meter {
-      height: 5px;
-      background: #30343d;
-      border-radius: 9px;
-      overflow: hidden;
-      margin-top: 12px;
-    }
-    .meter span {
-      display: block;
-      height: 100%;
-      width: 51%;
-      background: var(--green);
-      border-radius: inherit;
-      transition: width .3s;
-    }
-    .section {
-      padding: 16px 22px;
-      border-bottom: 1px solid var(--line);
-    }
-    .section-title {
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      font-size: 10px;
-      color: #777f8d;
-      font-weight: 800;
-      margin-bottom: 10px;
-    }
-    .line {
-      display: grid;
-      grid-template-columns: 27px 1fr auto;
       gap: 10px;
-      align-items: baseline;
-      padding: 9px 9px;
-      margin: 2px -9px;
+      padding: 8px 10px;
       border-radius: 6px;
-      font-family: ui-monospace, monospace;
-      font-size: 13px;
+      background: rgba(38,42,51,0.5);
+      border-left: 2px solid transparent;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      transition: background 0.15s;
     }
-    .line:hover, .line.active { background: #252a33; }
-    .rank { color: #69717e; font-size: 12px; }
-    .pv { color: #b5bbc5; flex: 1; word-break: break-word; }
-    .mini-score { font-size: 12px; color: var(--green); font-weight: 700; }
-    .positive { color: var(--green); }
-    .negative { color: var(--red); }
+    .pv-line:hover { background: rgba(38,42,51,0.9); cursor: pointer; }
+    .pv-line:nth-child(1) { border-left-color: var(--primary); }
+    .pv-line:nth-child(2) { border-left-color: var(--secondary); }
+    .pv-line:nth-child(3) { border-left-color: var(--outline); }
+    .pv-line .idx {
+      color: var(--text-variant);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .pv-line .moves { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pv-line .score {
+      font-weight: 700;
+      color: var(--primary);
+      flex-shrink: 0;
+    }
+    .pv-line .score.neg { color: var(--error); }
+    .pv-line.empty .moves { color: var(--outline); }
 
-    .moves-panel {
+    /* PGN/FEN */
+    textarea, input[type="text"], select {
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 8px 10px;
+      border: 1px solid rgba(60,74,66,0.4);
+      border-radius: 6px;
+      background: var(--surface-lowest);
+      color: var(--text);
+      transition: border-color 0.15s;
+    }
+    textarea:focus, input[type="text"]:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    textarea { height: 78px; resize: vertical; }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .row > * { flex: 1; }
+
+    /* Moves card */
+    .moves-card {
       display: flex;
       flex-direction: column;
-      padding: 16px 22px 0;
+      min-height: 0;
     }
     .move-list {
-      max-height: 340px;
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #15181d;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid rgba(60,74,66,0.3);
+      border-radius: 8px;
+      background: var(--surface-lowest);
     }
     .move-row {
       display: grid;
-      grid-template-columns: 38px 1fr 1fr;
-      min-height: 36px;
-      border-bottom: 1px solid #242831;
+      grid-template-columns: 40px 1fr 1fr;
+      min-height: 34px;
+      border-bottom: 1px solid rgba(44,49,59,0.8);
       align-items: center;
-      font-size: 13px;
-      font-family: ui-monospace, monospace;
+      font-family: var(--font-mono);
+      font-size: 12px;
     }
-    .move-row:last-child { border: 0; }
-    .move-no { color: #646c78; padding-left: 11px; }
-    .move-cell { padding: 8px 6px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 6px; }
-    .move-cell:hover, .move-cell.active { background: #2b3039; color: white; }
+    .move-row:last-child { border-bottom: 0; }
+    .move-no {
+      color: var(--outline);
+      padding-left: 12px;
+      font-size: 11px;
+    }
+    .move-cell {
+      padding: 7px 8px;
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.1s;
+      min-width: 0;
+    }
+    .move-cell:hover { background: rgba(38,42,51,0.9); }
+    .move-cell.active {
+      background: rgba(78,222,163,0.15);
+      color: #fff;
+      box-shadow: inset 0 0 0 1px rgba(78,222,163,0.3);
+    }
     .move-cell .badge {
       display: inline-block;
-      width: 18px; height: 18px;
+      width: 16px; height: 16px;
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
@@ -269,61 +641,32 @@
     .cls-forced     { background-image: url('icons/Forced.png'); }
     .cls-miss       { background-image: url('icons/Miss.png'); }
 
-    .controls {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 7px;
-      padding: 12px 0 16px;
-    }
-    button {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: #22262e;
-      color: #d9dce3;
-      border-radius: 6px;
-      padding: 9px 12px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: background .15s;
-    }
-    button:hover { background: #2b3039; }
-    button:active { transform: translateY(1px); }
-    button:disabled { opacity: 0.4; cursor: default; }
-    button.full { width: 100%; }
-
-    textarea, input[type="text"], select {
-      width: 100%;
-      font-family: ui-monospace, monospace;
-      font-size: 12px;
-      padding: 8px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #15181d;
-      color: var(--text);
-      margin-bottom: 8px;
-    }
-    textarea { height: 90px; resize: vertical; }
-
-    .io-buttons { display: flex; gap: 8px; margin-bottom: 8px; }
-    .io-buttons button { flex: 1; }
-
-    #aiOutput {
-      font-size: 13px;
+    /* AI card */
+    .ai-output {
+      font-size: 12.5px;
       line-height: 1.55;
       color: var(--text);
-      padding: 10px;
-      background: #15181d;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      min-height: 70px;
+      padding: 10px 12px;
+      background: var(--surface-lowest);
+      border: 1px solid rgba(60,74,66,0.3);
+      border-radius: 8px;
+      min-height: 60px;
       white-space: pre-wrap;
+      margin-top: 8px;
     }
+    .ai-output em { color: var(--outline); }
 
-    @media (max-width: 1000px) {
+    /* Responsive */
+    @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
-      .sidebar { border-left: 0; border-top: 1px solid var(--line); }
+      .sidebar { border-left: 0; border-top: 1px solid var(--line); padding: 20px; }
       .main { padding: 16px; }
     }
+
+    /* chessboard.js overrides to match dark theme */
+    .board-b72b1 { border: none !important; border-radius: 8px; overflow: hidden; }
+    .board-b72b1 .white-1e1d7 { background-color: #f0d9b5 !important; color: #b58863 !important; }
+    .board-b72b1 .black-3c85d { background-color: #b58863 !important; color: #f0d9b5 !important; }
   </style>
 </head>
 <body>
@@ -331,93 +674,181 @@
 <div class="app">
 
   <main class="main">
+
+    <!-- Topbar with engine chip -->
     <div class="topbar">
-      <div class="brand"><div class="logo">♞</div> Chess Analyzer</div>
-      <div class="status"><span class="dot"></span> <span id="statusDot">Loading engine…</span></div>
+      <div class="brand">
+        <div class="logo">♞</div>
+        <span>Chess Analyzer <span class="accent">/ Engine</span></span>
+      </div>
+      <div class="engine-chip">
+        <span class="dot"></span>
+        <span class="val-secondary" id="engineVersion">Stockfish 18 Lite</span>
+        <span class="sep">|</span>
+        <span>Depth <span class="val-primary" id="engineDepthChip">—</span></span>
+        <span class="sep">·</span>
+        <span><span class="val-primary" id="engineNpsChip">—</span> Mn/s</span>
+      </div>
     </div>
 
-    <div class="board-row">
-      <div class="evalbar-wrap">
-        <div class="evalfill" id="evalfill"></div>
+    <!-- Top player strip (Black) -->
+    <div class="player-strip" id="stripBlack">
+      <div class="player-info">
+        <div class="player-avatar dark" id="avatarBlack">♚</div>
+        <div class="player-names">
+          <div class="player-name-row">
+            <span class="player-name" id="nameBlack">Black</span>
+            <span class="player-elo" id="eloBlack">—</span>
+            <span class="player-country" id="countryBlack"></span>
+          </div>
+          <div class="player-captured">
+            <span id="capturedBlack"></span>
+            <span class="captured-adv" id="advBlack" style="display:none"></span>
+          </div>
+        </div>
+      </div>
+      <div class="player-timer" id="timerBlack">--:--</div>
+    </div>
+
+    <!-- Board shell with eval bar -->
+    <div class="board-shell">
+      <div class="eval-bar">
+        <div class="depth-tag" id="evalDepthTag">D:—</div>
+        <div class="eval-fill" id="evalFill"></div>
+        <div class="score-tag" id="evalScoreTag">+0.00</div>
       </div>
       <div class="board-wrap">
         <div id="board"></div>
+        <svg id="arrow-svg" viewBox="0 0 800 800" preserveAspectRatio="none"></svg>
         <div id="board-overlay"></div>
       </div>
     </div>
 
-    <div id="status">White to move</div>
-    <div class="nav">
-      <button id="first">⏮</button>
-      <button id="prev">◀</button>
-      <button id="next">▶</button>
-      <button id="last">⏭</button>
+    <!-- Bottom player strip (White) -->
+    <div class="player-strip active" id="stripWhite">
+      <div class="player-info">
+        <div class="player-avatar light" id="avatarWhite">♔</div>
+        <div class="player-names">
+          <div class="player-name-row">
+            <span class="player-name" id="nameWhite">White</span>
+            <span class="player-elo" id="eloWhite">—</span>
+            <span class="player-country" id="countryWhite"></span>
+          </div>
+          <div class="player-captured">
+            <span id="capturedWhite"></span>
+            <span class="captured-adv" id="advWhite" style="display:none"></span>
+          </div>
+        </div>
+      </div>
+      <div class="player-timer" id="timerWhite">--:--</div>
     </div>
-    <div id="fen"></div>
+
+    <!-- Playback dock -->
+    <div class="playback">
+      <div class="playback-buttons">
+        <button class="btn" id="first" title="First move">⏮</button>
+        <button class="btn" id="prev" title="Previous">◀</button>
+        <button class="btn" id="next" title="Next">▶</button>
+        <button class="btn" id="last" title="Last move">⏭</button>
+      </div>
+      <div class="fen-inline">
+        <span class="label">FEN:</span>
+        <span class="value" id="fenInline">—</span>
+      </div>
+    </div>
+
+    <div class="status-line" id="status">White to move</div>
+
   </main>
 
   <aside class="sidebar">
 
-    <div class="side-head">
-      <div class="title-row">
-        <h1>Analysis</h1>
-        <button class="gear" id="toggleTheme" title="Toggle theme">☾</button>
+    <!-- Engine evaluation -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Engine evaluation</span>
+        <span class="card-meta" id="engineStatusCard">Loading…</span>
       </div>
-      <div class="eval">
-        <span class="score" id="evalLine">—</span>
-        <span class="depth" id="engineStatus">Loading engine…</span>
+      <div class="eval-rows">
+        <div class="eval-row">
+          <span class="k">Score</span>
+          <span class="v big" id="evalScoreCard">—</span>
+        </div>
+        <div class="eval-row">
+          <span class="k">Depth</span>
+          <span class="v" id="evalDepthCard">—</span>
+        </div>
+        <div class="eval-row">
+          <span class="k">Compute</span>
+          <span class="v accent" id="evalNpsCard">—</span>
+        </div>
       </div>
-      <div class="meter"><span id="meter"></span></div>
     </div>
 
-    <section class="section">
-      <div class="section-title">Engine's Top 3 Lines</div>
-      <div id="multiPv">
-        <div class="line"><span class="rank">—</span><span class="pv">waiting…</span><span class="mini-score">—</span></div>
-        <div class="line"><span class="rank">—</span><span class="pv">waiting…</span><span class="mini-score">—</span></div>
-        <div class="line"><span class="rank">—</span><span class="pv">waiting…</span><span class="mini-score">—</span></div>
+    <!-- Top 3 lines -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Engine's top 3 lines</span>
+        <span class="card-meta">Multi-PV</span>
       </div>
-    </section>
-
-    <section class="section">
-      <div class="section-title">PGN</div>
-      <textarea id="pgnInput" placeholder="Paste PGN here, e.g.&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
-      <div class="io-buttons">
-        <button id="loadPgn">Load PGN</button>
-        <button id="loadStart">Reset</button>
+      <div class="pv-list" id="multiPv">
+        <div class="pv-line empty"><span class="idx">1.</span><span class="moves">waiting…</span><span class="score">—</span></div>
+        <div class="pv-line empty"><span class="idx">2.</span><span class="moves">waiting…</span><span class="score">—</span></div>
+        <div class="pv-line empty"><span class="idx">3.</span><span class="moves">waiting…</span><span class="score">—</span></div>
       </div>
-    </section>
+    </div>
 
-    <section class="section">
-      <div class="section-title">FEN</div>
-      <input type="text" id="fenInput" placeholder="Paste a FEN string">
-      <div class="io-buttons">
-        <button id="loadFen">Load FEN</button>
+    <!-- PGN -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Enter your PGN here</span>
+        <span class="card-meta" id="pgnPlies">— plies</span>
       </div>
-    </section>
-
-    <section class="moves-panel">
-      <div class="section-title">Moves</div>
-      <div class="move-list" id="moveList"><em style="color:#666; padding: 12px; display:block;">No game loaded</em></div>
-      <div class="controls">
-        <button id="first2">⏮</button>
-        <button id="prev2">◀</button>
-        <button id="next2">▶</button>
-        <button id="last2">⏭</button>
+      <textarea id="pgnInput" placeholder="1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
+      <div class="row">
+        <button class="btn" id="loadPgn">Load PGN</button>
+        <button class="btn" id="loadStart">Reset</button>
       </div>
-      <button class="full" id="analyzeAllBtn" disabled>Analyze Full Game</button>
-      <div id="analyzeAllStatus" style="font-size:11px; color:var(--muted); text-align:center; margin:8px 0 16px;"></div>
-    </section>
+    </div>
 
-    <section class="section">
-      <div class="section-title">AI Explanation</div>
+    <!-- FEN -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Enter your FEN here</span>
+        <span class="card-meta" id="fenMeta">Live</span>
+      </div>
+      <input type="text" id="fenInput" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">
+      <div class="row">
+        <button class="btn" id="loadFen">Load FEN</button>
+      </div>
+    </div>
+
+    <!-- Moves -->
+    <div class="card moves-card">
+      <div class="card-header">
+        <span class="card-title">Your moves with classifications</span>
+        <span class="card-meta" id="movesMeta">—</span>
+      </div>
+      <div class="move-list" id="moveList">
+        <em style="color:#666; padding: 12px; display:block;">No game loaded</em>
+      </div>
+      <button class="btn full primary" id="analyzeAllBtn" style="margin-top: 10px;" disabled>Analyze Full Game</button>
+      <div id="analyzeAllStatus" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px;"></div>
+    </div>
+
+    <!-- AI Explanation -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">AI Explanation</span>
+        <span class="card-meta">DeepSeek / MiMo</span>
+      </div>
       <select id="aiModel">
         <option value="deepseek-v4.1-flash:free">deepseek-v4.1-flash:free</option>
         <option value="mimo-v2.6-flash:free">mimo-v2.6-flash:free</option>
       </select>
-      <button class="full" id="aiExplainBtn" style="margin-bottom:8px;">Explain Current Move</button>
-      <div id="aiOutput"><em style="color:#666;">Load a game, analyze it, then click a move and hit Explain.</em></div>
-    </section>
+      <button class="btn full primary" id="aiExplainBtn" style="margin-top: 8px;">Explain Current Move</button>
+      <div class="ai-output" id="aiOutput"><em>Load a game, analyze it, then click a move and hit Explain.</em></div>
+    </div>
 
   </aside>
 
@@ -436,12 +867,15 @@ window.addEventListener('chessjs-ready', () => {
     pieceTheme: 'icons/{piece}.png',
     dropOffBoard: 'snapback',
     onDrop: onDrop,
-    onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); }
+    onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); renderArrow(); }
   });
 
   let game = new Chess();
   let history = [];
   let cursor = 0;
+
+  // Latest engine info for the current position (auto/manual eval)
+  let latestEngineInfo = { depth: null, nps: null, score: null, mate: null };
 
   function onDrop(source, target) {
     try {
@@ -458,6 +892,7 @@ window.addEventListener('chessjs-ready', () => {
     } catch (e) { return 'snapback'; }
   }
 
+  // ---------- Board overlay (classification badges) ----------
   function renderBoardOverlay() {
     const overlay = document.getElementById('board-overlay');
     if (!overlay) return;
@@ -472,7 +907,7 @@ window.addEventListener('chessjs-ready', () => {
 
     const size = overlay.parentElement.clientWidth;
     const sq = size / 8;
-    const badgeSize = 38;
+    const badgeSize = 34;
 
     const badge = document.createElement('div');
     badge.className = 'sq-badge cls-' + mv.cls;
@@ -482,11 +917,155 @@ window.addEventListener('chessjs-ready', () => {
     overlay.appendChild(badge);
   }
 
+  // ---------- Best-move arrow ----------
+  function renderArrow() {
+    const svg = document.getElementById('arrow-svg');
+    if (!svg) return;
+    svg.innerHTML = '';
+
+    if (!lastPvUci || !lastPvUci.length) return;
+    const uci = lastPvUci[0];
+    if (!/^[a-h][1-8][a-h][1-8]/.test(uci)) return;
+
+    const fromFile = uci.charCodeAt(0) - 97;
+    const fromRank = parseInt(uci[1], 10) - 1;
+    const toFile   = uci.charCodeAt(2) - 97;
+    const toRank   = parseInt(uci[3], 10) - 1;
+
+    // Board coords: 0..800 viewBox, 100 per square.
+    // Rank 8 at top, rank 1 at bottom.
+    const sq = 100;
+    const cx = (f) => f * sq + sq / 2;
+    const cy = (r) => (7 - r) * sq + sq / 2;
+
+    const x1 = cx(fromFile);
+    const y1 = cy(fromRank);
+    const x2 = cx(toFile);
+    const y2 = cy(toRank);
+
+    // Marker
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+      <marker id="arrowhead" markerWidth="6" markerHeight="6" orient="auto" refX="3.2" refY="3">
+        <polygon points="0 0, 6 3, 0 6" fill="#4edea3"></polygon>
+      </marker>`;
+    svg.appendChild(defs);
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1);
+    line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2);
+    line.setAttribute('y2', y2);
+    line.setAttribute('stroke', '#4edea3');
+    line.setAttribute('stroke-width', '18');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke-opacity', '0.9');
+    line.setAttribute('marker-end', 'url(#arrowhead)');
+    svg.appendChild(line);
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', x2);
+    circle.setAttribute('cy', y2);
+    circle.setAttribute('r', '34');
+    circle.setAttribute('fill', 'none');
+    circle.setAttribute('stroke', '#4edea3');
+    circle.setAttribute('stroke-width', '3');
+    circle.setAttribute('stroke-dasharray', '6,4');
+    circle.setAttribute('opacity', '0.8');
+    svg.appendChild(circle);
+  }
+
   function renderBoard() {
     board.position(game.fen(), false);
     renderBoardOverlay();
+    renderArrow();
   }
 
+  // ---------- Player strips ----------
+  function renderPlayerStrips(pgnHeaders) {
+    // pgnHeaders is optional — { White, Black, WhiteElo, BlackElo, ... }
+    const h = pgnHeaders || {};
+
+    document.getElementById('nameWhite').textContent = h.White || 'White';
+    document.getElementById('nameBlack').textContent = h.Black || 'Black';
+    document.getElementById('eloWhite').textContent = h.WhiteElo ? 'ELO ' + h.WhiteElo : '—';
+    document.getElementById('eloBlack').textContent = h.BlackElo ? 'ELO ' + h.BlackElo : '—';
+
+    // Timers — we don't parse time control yet, show placeholder
+    document.getElementById('timerWhite').textContent = '--:--';
+    document.getElementById('timerBlack').textContent = '--:--';
+
+    // Active strip = side to move
+    const turn = game.turn();
+    document.getElementById('stripWhite').classList.toggle('active', turn === 'w');
+    document.getElementById('stripBlack').classList.toggle('active', turn === 'b');
+
+    // Captured pieces
+    renderCaptured();
+  }
+
+  function renderCaptured() {
+    // Compute captured pieces from the current position vs the starting set.
+    const startCounts = {
+      w: { p: 8, n: 2, b: 2, r: 2, q: 1 },
+      b: { p: 8, n: 2, b: 2, r: 2, q: 1 }
+    };
+
+    const boardArr = game.board();
+    const nowCounts = {
+      w: { p: 0, n: 0, b: 0, r: 0, q: 0 },
+      b: { p: 0, n: 0, b: 0, r: 0, q: 0 }
+    };
+    for (const row of boardArr) {
+      for (const sq of row) {
+        if (!sq) continue;
+        if (sq.type === 'k') continue;
+        nowCounts[sq.color][sq.type] = (nowCounts[sq.color][sq.type] || 0) + 1;
+      }
+    }
+
+    // Captured = starting count - current count for each side.
+    // A capture of a White piece shows up on the "Black" strip (Black captured it).
+    const capturedByBlack = []; // White pieces missing
+    const capturedByWhite = []; // Black pieces missing
+
+    const glyphs = { w: { p:'♙', n:'♘', b:'♗', r:'♖', q:'♕' }, b: { p:'♟', n:'♞', b:'♝', r:'♜', q:'♛' } };
+
+    for (const type of ['q','r','b','n','p']) {
+      const missingWhite = Math.max(0, startCounts.w[type] - nowCounts.w[type]);
+      const missingBlack = Math.max(0, startCounts.b[type] - nowCounts.b[type]);
+      for (let i = 0; i < missingWhite; i++) capturedByBlack.push(glyphs.w[type]);
+      for (let i = 0; i < missingBlack; i++) capturedByWhite.push(glyphs.b[type]);
+    }
+
+    document.getElementById('capturedWhite').textContent = capturedByWhite.join('');
+    document.getElementById('capturedBlack').textContent = capturedByBlack.join('');
+
+    // Material advantage
+    const valW = nowCounts.w.q * 9 + nowCounts.w.r * 5 + nowCounts.w.b * 3 + nowCounts.w.n * 3 + nowCounts.w.p;
+    const valB = nowCounts.b.q * 9 + nowCounts.b.r * 5 + nowCounts.b.b * 3 + nowCounts.b.n * 3 + nowCounts.b.p;
+    const diff = valW - valB;
+
+    const advWhite = document.getElementById('advWhite');
+    const advBlack = document.getElementById('advBlack');
+
+    if (diff > 0) {
+      advWhite.style.display = '';
+      advWhite.textContent = '+' + diff;
+      advWhite.className = 'captured-adv pos';
+      advBlack.style.display = 'none';
+    } else if (diff < 0) {
+      advBlack.style.display = '';
+      advBlack.textContent = '+' + Math.abs(diff);
+      advBlack.className = 'captured-adv pos';
+      advWhite.style.display = 'none';
+    } else {
+      advWhite.style.display = 'none';
+      advBlack.style.display = 'none';
+    }
+  }
+
+  // ---------- Status / FEN display ----------
   function renderStatus() {
     const turn = game.turn() === 'w' ? 'White' : 'Black';
     let msg = turn + ' to move';
@@ -494,9 +1073,15 @@ window.addEventListener('chessjs-ready', () => {
     else if (game.isDraw()) msg = 'Draw';
     else if (game.isCheck()) msg = turn + ' is in check';
     document.getElementById('status').textContent = msg;
-    document.getElementById('fen').textContent = game.fen();
+    document.getElementById('fenInline').textContent = game.fen();
+    document.getElementById('fenMeta').textContent = 'Live';
+
+    // Update active strip based on turn
+    document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
+    document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
+  // ---------- Moves list ----------
   function badgeFor(cls) {
     if (!cls) return '';
     return `<span class="badge cls-${cls}"></span>`;
@@ -506,8 +1091,13 @@ window.addEventListener('chessjs-ready', () => {
     const el = document.getElementById('moveList');
     if (history.length === 0) {
       el.innerHTML = '<em style="color:#666; padding:12px; display:block;">No game loaded</em>';
+      document.getElementById('movesMeta').textContent = '—';
+      document.getElementById('pgnPlies').textContent = '— plies';
       return;
     }
+    document.getElementById('pgnPlies').textContent = history.length + ' plies';
+    document.getElementById('movesMeta').textContent = history.length + ' moves';
+
     let html = '';
     for (let i = 0; i < history.length; i += 2) {
       const num = (i / 2) + 1;
@@ -531,8 +1121,8 @@ window.addEventListener('chessjs-ready', () => {
   }
 
   function renderNavButtons() {
-    ['first','prev','first2','prev2'].forEach(id => document.getElementById(id).disabled = cursor === 0);
-    ['next','last','next2','last2'].forEach(id => document.getElementById(id).disabled = cursor >= history.length);
+    ['first','prev'].forEach(id => document.getElementById(id).disabled = cursor === 0);
+    ['next','last'].forEach(id => document.getElementById(id).disabled = cursor >= history.length);
     document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
   }
 
@@ -541,6 +1131,7 @@ window.addEventListener('chessjs-ready', () => {
     renderStatus();
     renderMoves();
     renderNavButtons();
+    renderCaptured();
     scheduleAutoAnalyze();
   }
 
@@ -558,10 +1149,6 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('prev').onclick  = () => gotoPly(cursor - 1);
   document.getElementById('next').onclick  = () => gotoPly(cursor + 1);
   document.getElementById('last').onclick  = () => gotoPly(history.length);
-  document.getElementById('first2').onclick = () => gotoPly(0);
-  document.getElementById('prev2').onclick  = () => gotoPly(cursor - 1);
-  document.getElementById('next2').onclick  = () => gotoPly(cursor + 1);
-  document.getElementById('last2').onclick  = () => gotoPly(history.length);
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -575,6 +1162,10 @@ window.addEventListener('chessjs-ready', () => {
     const g = new Chess();
     try { g.loadPgn(text); }
     catch (err) { alert('Could not parse PGN: ' + err.message); return; }
+
+    // Extract headers for player strips
+    const headers = g.header ? g.header() : {};
+
     const replay = new Chess();
     const moves = g.history({ verbose: true });
     const newHistory = [];
@@ -590,6 +1181,7 @@ window.addEventListener('chessjs-ready', () => {
     history = newHistory;
     cursor = history.length;
     game = replay;
+    renderPlayerStrips(headers);
     renderAll();
   };
 
@@ -599,6 +1191,7 @@ window.addEventListener('chessjs-ready', () => {
     try { game = new Chess(fen); }
     catch (err) { alert('Invalid FEN'); return; }
     history = []; cursor = 0;
+    renderPlayerStrips({});
     renderAll();
   };
 
@@ -607,12 +1200,9 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('pgnInput').value = '';
     document.getElementById('fenInput').value = '';
     document.getElementById('analyzeAllStatus').textContent = '';
-    document.getElementById('aiOutput').innerHTML = '<em style="color:#666;">Load a game, analyze it, then click a move and hit Explain.</em>';
+    document.getElementById('aiOutput').innerHTML = '<em>Load a game, analyze it, then click a move and hit Explain.</em>';
+    renderPlayerStrips({});
     renderAll();
-  };
-
-  document.getElementById('toggleTheme').onclick = () => {
-    document.body.classList.toggle('light-mode');
   };
 
   // ---------- Stockfish ----------
@@ -626,13 +1216,11 @@ window.addEventListener('chessjs-ready', () => {
   let multiPvLines = [];
 
   function initStockfish() {
-    document.getElementById('engineStatus').textContent = 'Loading engine…';
-    document.getElementById('statusDot').textContent = 'Loading engine…';
+    document.getElementById('engineStatusCard').textContent = 'Loading…';
     sf = new Worker('stockfish/stockfish-18-lite-single.js');
 
-    sf.onerror = (err) => {
-      document.getElementById('engineStatus').textContent = 'Engine error';
-      document.getElementById('statusDot').textContent = 'Engine error';
+    sf.onerror = () => {
+      document.getElementById('engineStatusCard').textContent = 'Error';
     };
 
     sf.onmessage = (e) => {
@@ -645,8 +1233,7 @@ window.addEventListener('chessjs-ready', () => {
         if (l === 'uciok')  { sf.postMessage('isready'); continue; }
         if (l === 'readyok') {
           sfReady = true;
-          document.getElementById('engineStatus').textContent = 'Engine ready';
-          document.getElementById('statusDot').textContent = 'Engine ready';
+          document.getElementById('engineStatusCard').textContent = 'Engine ready';
           renderNavButtons();
           scheduleAutoAnalyze();
           continue;
@@ -680,25 +1267,67 @@ window.addEventListener('chessjs-ready', () => {
       if (pi !== -1) {
         pvUci = parts.slice(pi + 1).filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
       }
+
+      // Depth / nps
+      const di = parts.indexOf('depth');
+      const depth = di !== -1 ? parseInt(parts[di + 1], 10) : null;
+      const ni = parts.indexOf('nps');
+      const nps = ni !== -1 ? parseInt(parts[ni + 1], 10) : null;
+
       if (score !== null || mate !== null) {
         job.lines[pvIdx - 1] = { score, mate, pvUci };
+        job.depth = depth;
+        job.nps = nps;
       }
+
       if (job.owner === 'auto' || job.owner === 'manual') {
         multiPvLines = job.lines;
         renderMultiPv(job.fen);
+
         if (pvIdx === 1) {
           const turn = job.fen.split(' ')[1];
           let evalText = '—';
           if (score !== null) evalText = formatScore('cp', score, turn);
           else if (mate !== null) evalText = formatScore('mate', mate, turn);
-          document.getElementById('evalLine').textContent = evalText;
 
+          // Card + eval bar
+          const scoreCard = document.getElementById('evalScoreCard');
+          scoreCard.textContent = evalText;
+          const isNeg = evalText.startsWith('-') || evalText.startsWith('-M');
+          scoreCard.classList.toggle('neg', isNeg);
+
+          // Depth
+          document.getElementById('evalDepthCard').textContent = depth !== null ? `${depth} / 60` : '—';
+          document.getElementById('evalDepthTag').textContent = 'D:' + (depth !== null ? depth : '—');
+
+          // NPS
+          if (nps !== null) {
+            const mns = (nps / 1e6).toFixed(1);
+            document.getElementById('evalNpsCard').textContent = `${nps.toLocaleString()} nps`;
+            document.getElementById('engineNpsChip').textContent = mns;
+          } else {
+            document.getElementById('evalNpsCard').textContent = '—';
+            document.getElementById('engineNpsChip').textContent = '—';
+          }
+          document.getElementById('engineDepthChip').textContent = depth !== null ? depth : '—';
+
+          // Eval bar
           const cpWhite = score !== null ? (turn === 'w' ? score : -score) : null;
           if (cpWhite !== null) {
             const clamped = Math.max(-1000, Math.min(1000, cpWhite));
             const pct = 50 - (clamped / 1000) * 45;
-            document.getElementById('evalfill').style.height = pct + '%';
-            document.getElementById('meter').style.width = (100 - pct) + '%';
+            document.getElementById('evalFill').style.height = pct + '%';
+            document.getElementById('evalScoreTag').textContent = formatScore('cp', score, turn);
+            document.getElementById('evalScoreTag').classList.toggle('neg', pct > 50);
+          } else if (mate !== null) {
+            const pct = mate > 0 ? 98 : 2;
+            document.getElementById('evalFill').style.height = pct + '%';
+            document.getElementById('evalScoreTag').textContent = formatScore('mate', mate, turn);
+          }
+
+          if (pvUci.length) {
+            lastPvUci = pvUci;
+            renderArrow();
           }
         }
       }
@@ -782,21 +1411,21 @@ window.addEventListener('chessjs-ready', () => {
     for (let i = 0; i < 3; i++) {
       const line = multiPvLines[i];
       if (!line) {
-        html += `<div class="line"><span class="rank">${i+1}</span><span class="pv">…</span><span class="mini-score">—</span></div>`;
+        html += `<div class="pv-line empty"><span class="idx">${i+1}.</span><span class="moves">…</span><span class="score">—</span></div>`;
         continue;
       }
       let scoreTxt = '—';
-      let cls = 'mini-score';
+      let cls = 'score';
       if (line.mate !== null && line.mate !== undefined) {
         scoreTxt = formatScore('mate', line.mate, turn);
       } else if (line.score !== null && line.score !== undefined) {
         scoreTxt = formatScore('cp', line.score, turn);
         const whiteCp = turn === 'w' ? line.score : -line.score;
-        cls += whiteCp >= 0 ? ' positive' : ' negative';
+        if (whiteCp < 0) cls += ' neg';
       }
       const sans = uciLineToSan(fen, line.pvUci.slice(0, 8));
       const lineTxt = sans.join(' ') || '…';
-      html += `<div class="line"><span class="rank">${i+1}</span><span class="pv">${lineTxt}</span><span class="${cls}">${scoreTxt}</span></div>`;
+      html += `<div class="pv-line"><span class="idx">${i+1}.</span><span class="moves">${lineTxt}</span><span class="${cls}">${scoreTxt}</span></div>`;
     }
     container.innerHTML = html;
   }
@@ -806,7 +1435,7 @@ window.addEventListener('chessjs-ready', () => {
     if (autoTimer) clearTimeout(autoTimer);
     autoTimer = setTimeout(() => {
       autoTimer = null;
-      document.getElementById('evalLine').textContent = '…';
+      document.getElementById('evalScoreCard').textContent = '…';
       lastPvUci = [];
       multiPvLines = [];
       renderMultiPv(game.fen());
@@ -814,7 +1443,7 @@ window.addEventListener('chessjs-ready', () => {
     }, 150);
   }
 
-  // ---------- Win probability ----------
+  // ---------- Win probability / material ----------
   function cpToWinProb(cp) { return 1 / (1 + Math.exp(-0.00368208 * cp)); }
 
   function materialCount(fen) {
@@ -829,6 +1458,7 @@ window.addEventListener('chessjs-ready', () => {
     return { w, b };
   }
 
+  // ---------- Theory book ----------
   function isTheory(moveIndex, san) {
     const BOOK = [
       ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
@@ -1013,17 +1643,6 @@ window.addEventListener('chessjs-ready', () => {
     return (bestCp - secondCp) >= 100;
   }
 
-  // ---------- Miss detection ----------
-  // A Miss = the mover had a winning position, played a non-best move,
-  // and gave most of the advantage back. The engine's best move was
-  // clearly better than what was played.
-  //
-  // Conditions:
-  //   - Position before was winning for the mover (eval >= +2.0 / mate)
-  //   - Played move was NOT the engine's top choice
-  //   - Position after is no longer winning (eval < +1.0)
-  //
-  // Excluded: moves that were already forced, theory, or Brilliant.
   function isMiss(playedMatchesBest, preCpMover, postCpMover) {
     if (playedMatchesBest) return false;
     const wasWinning = preCpMover >= 200 || preCpMover >= 9000;
@@ -1062,10 +1681,7 @@ window.addEventListener('chessjs-ready', () => {
     const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
     if (brilliant) { mv.cls = 'brilliant'; return; }
 
-    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) {
-      mv.cls = 'miss';
-      return;
-    }
+    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) { mv.cls = 'miss'; return; }
 
     const bothWinning = preCpMover >= 900 && postCpMover >= 900;
     const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
@@ -1114,13 +1730,13 @@ window.addEventListener('chessjs-ready', () => {
     const model  = document.getElementById('aiModel').value;
     const output = document.getElementById('aiOutput');
     if (cursor === 0) {
-      output.innerHTML = '<em style="color:#d99">Load a game first.</em>';
+      output.innerHTML = '<em>Load a game first.</em>';
       return;
     }
     const mv = history[cursor - 1];
     const fenBefore = cursor === 1 ? START_FEN : history[cursor - 2].fen;
     const fenAfter  = mv.fen;
-    output.innerHTML = '<em style="color:#666;">Thinking…</em>';
+    output.innerHTML = '<em>Thinking…</em>';
 
     const prompt = `You are a chess coach. Explain this move in 2-3 short sentences.
 
@@ -1164,8 +1780,9 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
     }
   };
 
-  window.addEventListener('resize', () => renderBoardOverlay());
+  window.addEventListener('resize', () => { renderBoardOverlay(); renderArrow(); });
 
+  renderPlayerStrips({});
   renderAll();
   initStockfish();
 
