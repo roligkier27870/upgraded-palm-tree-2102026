@@ -24,7 +24,6 @@
     * { box-sizing: border-box; }
 
     :root {
-      /* Palette from the Stitch mockup */
       --bg: #0f131c;
       --surface: #0f131c;
       --surface-low: #181c24;
@@ -34,7 +33,6 @@
       --surface-lowest: #0a0e16;
       --line: #2c313b;
       --outline: #3c4a42;
-      --outline-variant: #3c4a42;
 
       --text: #dfe2ee;
       --text-variant: #bbcabf;
@@ -59,11 +57,7 @@
       --font-mono: 'JetBrains Mono', ui-monospace, monospace;
     }
 
-    html, body {
-      margin: 0;
-      padding: 0;
-      min-height: 100%;
-    }
+    html, body { margin: 0; padding: 0; min-height: 100%; }
     body {
       font-family: var(--font-body);
       background:
@@ -76,7 +70,6 @@
       overscroll-behavior: none;
     }
 
-    /* ---------- App shell ---------- */
     .app {
       min-height: 100vh;
       display: grid;
@@ -141,10 +134,7 @@
       box-shadow: 0 0 8px rgba(76,215,246,0.6);
       animation: pulse 2s ease-in-out infinite;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
     .engine-chip .sep { color: var(--outline); }
     .engine-chip .val-primary { color: var(--primary); font-weight: 600; }
     .engine-chip .val-secondary { color: var(--secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
@@ -165,38 +155,20 @@
       border-color: rgba(78,222,163,0.4);
       box-shadow: 0 0 0 1px rgba(78,222,163,0.15);
     }
-    .player-info {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
-      flex: 1;
-    }
+    .player-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
     .player-avatar {
       width: 36px; height: 36px;
       border-radius: 8px;
       background: var(--surface-high);
-      display: grid;
-      place-items: center;
+      display: grid; place-items: center;
       font-size: 22px;
       color: var(--text);
       flex-shrink: 0;
     }
-    .player-avatar.light {
-      background: #f1f1ee;
-      color: #1a1a1a;
-    }
-    .player-avatar.dark {
-      background: #1c1c1c;
-      color: #f1f1ee;
-    }
+    .player-avatar.light { background: #f1f1ee; color: #1a1a1a; }
+    .player-avatar.dark { background: #1c1c1c; color: #f1f1ee; }
     .player-names { min-width: 0; }
-    .player-name-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
+    .player-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .player-name {
       font-family: var(--font-display);
       font-weight: 600;
@@ -216,11 +188,7 @@
       background: var(--surface-highest);
       color: var(--text-variant);
     }
-    .player-country {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--outline);
-    }
+    .player-country { font-family: var(--font-mono); font-size: 10px; color: var(--outline); }
     .player-captured {
       display: flex;
       align-items: center;
@@ -238,14 +206,7 @@
       border-radius: 3px;
       letter-spacing: 0;
     }
-    .captured-adv.pos {
-      color: var(--primary);
-      background: rgba(78,222,163,0.1);
-    }
-    .captured-adv.neg {
-      color: var(--error);
-      background: rgba(255,180,171,0.1);
-    }
+    .captured-adv.pos { color: var(--primary); background: rgba(78,222,163,0.1); }
     .player-timer {
       display: flex;
       align-items: center;
@@ -284,12 +245,12 @@
       width: 100%;
     }
 
-    /* Eval bar */
+    /* Eval bar — orientation fixed: fills FROM TOP for White, FROM BOTTOM for Black */
     .eval-bar {
       width: 34px;
       border-radius: 6px;
       overflow: hidden;
-      background: var(--surface-highest);
+      background: #0a0e16;
       position: relative;
       display: flex;
       flex-direction: column;
@@ -305,29 +266,31 @@
       font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 600;
-      background: rgba(10,14,22,0.85);
+      background: rgba(10,14,22,0.9);
       color: var(--outline);
       z-index: 5;
     }
+    /* The white portion — anchored to the TOP, height = White's share */
     .eval-bar .eval-fill {
       position: absolute;
       left: 0;
-      bottom: 0;
+      top: 0;
       width: 100%;
       height: 50%;
-      background: linear-gradient(to top, #ffffff, #e6e9ee, #cdd2dd);
-      transition: height 0.4s ease;
+      background: linear-gradient(to bottom, #ffffff, #e6e9ee, #cdd2dd);
+      transition: height 0.35s ease;
     }
-    .eval-bar .eval-fill::before {
+    .eval-bar .eval-fill::after {
       content: "";
       position: absolute;
-      top: 0;
+      bottom: 0;
       left: 0;
       width: 100%;
       height: 2px;
       background: var(--primary);
       box-shadow: 0 0 8px var(--primary);
     }
+    /* The score tag sits at bottom, always readable */
     .eval-bar .score-tag {
       width: 100%;
       text-align: center;
@@ -366,8 +329,8 @@
     }
     #board-overlay .sq-badge {
       position: absolute;
-      width: 48px;
-      height: 48px;
+      width: 26px;
+      height: 26px;
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
@@ -378,6 +341,14 @@
       inset: 0;
       pointer-events: none;
       z-index: 9;
+    }
+
+    /* Piece glide animation
+       chessboard.js swaps pieces between squares via absolute positioning;
+       a CSS transition on transform gives a soft glide when pieces move. */
+    .board-b72b1 .piece-417db,
+    .board-b72b1 img[data-piece] {
+      transition: transform 0.18s ease-out;
     }
 
     /* ---------- Playback dock ---------- */
@@ -393,10 +364,7 @@
       border: 1px solid rgba(60,74,66,0.2);
       flex-wrap: wrap;
     }
-    .playback-buttons {
-      display: flex;
-      gap: 6px;
-    }
+    .playback-buttons { display: flex; gap: 6px; }
     .btn {
       appearance: none;
       border: 1px solid rgba(60,74,66,0.3);
@@ -416,12 +384,6 @@
     .btn:hover:not(:disabled) { background: var(--surface-highest); }
     .btn:active:not(:disabled) { transform: translateY(1px); }
     .btn:disabled { opacity: 0.35; cursor: default; }
-    .btn.icon-btn {
-      min-width: 36px;
-      justify-content: center;
-      padding: 7px 10px;
-      font-size: 16px;
-    }
     .btn.primary {
       background: var(--primary-container);
       color: var(--on-primary-container);
@@ -449,7 +411,6 @@
       max-width: 320px;
     }
 
-    /* ---------- Status line ---------- */
     .status-line {
       text-align: center;
       font-family: var(--font-mono);
@@ -468,7 +429,6 @@
       padding: 20px 20px 20px 0;
       overflow-y: auto;
     }
-
     .card {
       background: rgba(28,32,40,0.85);
       backdrop-filter: blur(12px);
@@ -499,7 +459,6 @@
       letter-spacing: 0.5px;
     }
 
-    /* Eval card */
     .eval-rows { display: flex; flex-direction: column; gap: 6px; }
     .eval-row {
       display: flex;
@@ -508,11 +467,7 @@
       font-size: 12px;
     }
     .eval-row .k { color: var(--text-variant); }
-    .eval-row .v {
-      font-family: var(--font-mono);
-      font-weight: 600;
-      color: var(--text);
-    }
+    .eval-row .v { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
     .eval-row .v.big {
       font-family: var(--font-display);
       font-size: 24px;
@@ -523,7 +478,6 @@
     .eval-row .v.big.neg { color: var(--error); }
     .eval-row .v.accent { color: var(--primary); }
 
-    /* Top 3 lines */
     .pv-list { display: flex; flex-direction: column; gap: 6px; }
     .pv-line {
       display: flex;
@@ -541,21 +495,12 @@
     .pv-line:nth-child(1) { border-left-color: var(--primary); }
     .pv-line:nth-child(2) { border-left-color: var(--secondary); }
     .pv-line:nth-child(3) { border-left-color: var(--outline); }
-    .pv-line .idx {
-      color: var(--text-variant);
-      font-weight: 700;
-      flex-shrink: 0;
-    }
+    .pv-line .idx { color: var(--text-variant); font-weight: 700; flex-shrink: 0; }
     .pv-line .moves { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pv-line .score {
-      font-weight: 700;
-      color: var(--primary);
-      flex-shrink: 0;
-    }
+    .pv-line .score { font-weight: 700; color: var(--primary); flex-shrink: 0; }
     .pv-line .score.neg { color: var(--error); }
     .pv-line.empty .moves { color: var(--outline); }
 
-    /* PGN/FEN */
     textarea, input[type="text"], select {
       width: 100%;
       font-family: var(--font-mono);
@@ -573,19 +518,43 @@
     }
     textarea { height: 78px; resize: vertical; }
 
-    .row {
-      display: flex;
-      gap: 8px;
-      margin-top: 8px;
-    }
+    .row { display: flex; gap: 8px; margin-top: 8px; }
     .row > * { flex: 1; }
 
-    /* Moves card */
-    .moves-card {
+    /* ---------- Moves card with tabs ---------- */
+    .moves-card { display: flex; flex-direction: column; min-height: 0; }
+
+    .tab-switch {
       display: flex;
-      flex-direction: column;
-      min-height: 0;
+      align-items: center;
+      background: var(--surface-lowest);
+      padding: 2px;
+      border-radius: 8px;
+      border: 1px solid rgba(60,74,66,0.3);
+      font-family: var(--font-mono);
+      font-size: 11px;
     }
+    .tab-switch button {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: var(--text-variant);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .tab-switch button.active {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .tab-switch button:hover:not(.active) { color: var(--text); }
+
+    /* Move list view */
     .move-list {
       max-height: 300px;
       overflow-y: auto;
@@ -603,11 +572,7 @@
       font-size: 12px;
     }
     .move-row:last-child { border-bottom: 0; }
-    .move-no {
-      color: var(--outline);
-      padding-left: 12px;
-      font-size: 11px;
-    }
+    .move-no { color: var(--outline); padding-left: 12px; font-size: 11px; }
     .move-cell {
       padding: 7px 8px;
       cursor: pointer;
@@ -633,6 +598,111 @@
       flex-shrink: 0;
     }
 
+    /* Present Move view (hero) */
+    .present-move {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 14px;
+      background: rgba(24,28,36,0.6);
+      border: 1px solid rgba(60,74,66,0.25);
+      border-radius: 8px;
+      gap: 8px;
+    }
+    .hero-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+    }
+    .hero-move-text {
+      font-family: var(--font-display);
+      font-size: 44px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -1.5px;
+      line-height: 1;
+    }
+    .hero-badge {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.4);
+      border: 2px solid var(--surface-container);
+      background-size: 68%;
+      background-repeat: no-repeat;
+      background-position: center;
+      flex-shrink: 0;
+      transition: transform 0.15s;
+    }
+    .hero-badge:hover { transform: scale(1.05); }
+    .hero-badge-empty { background: var(--surface-highest); color: var(--outline); font-size: 20px; }
+
+    /* Hero badge backgrounds by classification — solid colour + white icon */
+    .hero-badge.cls-brilliant  { background-color: #26c2a3; }
+    .hero-badge.cls-great      { background-color: #749bbf; }
+    .hero-badge.cls-best       { background-color: #7fb85c; }
+    .hero-badge.cls-excellent  { background-color: #95b776; }
+    .hero-badge.cls-good       { background-color: #95b776; }
+    .hero-badge.cls-theory     { background-color: #a88865; }
+    .hero-badge.cls-inaccuracy { background-color: #f7c631; }
+    .hero-badge.cls-mistake    { background-color: #e58f2a; }
+    .hero-badge.cls-blunder    { background-color: #ca3431; }
+    .hero-badge.cls-forced     { background-color: #8a8a8a; }
+    .hero-badge.cls-miss       { background-color: #ff7b8a; }
+
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-variant);
+    }
+    .hero-meta .ply-pill {
+      padding: 2px 8px;
+      background: var(--surface-highest);
+      border-radius: 999px;
+      color: var(--text-variant);
+    }
+    .hero-meta .cls-pill {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .hero-nav {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+      max-width: 320px;
+      margin-top: 6px;
+    }
+    .hero-nav button {
+      appearance: none;
+      border: 1px solid rgba(60,74,66,0.3);
+      background: #334155;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .hero-nav button:hover:not(:disabled) { background: #475569; }
+    .hero-nav button:active:not(:disabled) { transform: translateY(1px); }
+    .hero-nav button:disabled { opacity: 0.4; cursor: default; }
+    .hero-nav button.primary { background: #2563eb; }
+    .hero-nav button.primary:hover:not(:disabled) { background: #1d4ed8; }
+
     .cls-brilliant  { background-image: url('icons/Brilliant.png'); }
     .cls-great      { background-image: url('icons/Great.png'); }
     .cls-best       { background-image: url('icons/Best.png'); }
@@ -645,7 +715,6 @@
     .cls-forced     { background-image: url('icons/Forced.png'); }
     .cls-miss       { background-image: url('icons/Miss.png'); }
 
-    /* AI card */
     .ai-output {
       font-size: 12.5px;
       line-height: 1.55;
@@ -660,14 +729,12 @@
     }
     .ai-output em { color: var(--outline); }
 
-    /* Responsive */
     @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { border-left: 0; border-top: 1px solid var(--line); padding: 20px; }
       .main { padding: 16px; }
     }
 
-    /* chessboard.js overrides to match dark theme */
     .board-b72b1 { border: none !important; border-radius: 8px; overflow: hidden; }
     .board-b72b1 .white-1e1d7 { background-color: #f0d9b5 !important; color: #b58863 !important; }
     .board-b72b1 .black-3c85d { background-color: #b58863 !important; color: #f0d9b5 !important; }
@@ -679,7 +746,6 @@
 
   <main class="main">
 
-    <!-- Topbar with engine chip -->
     <div class="topbar">
       <div class="brand">
         <div class="logo">♞</div>
@@ -695,7 +761,6 @@
       </div>
     </div>
 
-    <!-- Top player strip (Black) -->
     <div class="player-strip" id="stripBlack">
       <div class="player-info">
         <div class="player-avatar dark" id="avatarBlack">♚</div>
@@ -714,7 +779,6 @@
       <div class="player-timer" id="timerBlack">--:--</div>
     </div>
 
-    <!-- Board shell with eval bar -->
     <div class="board-shell">
       <div class="eval-bar">
         <div class="depth-tag" id="evalDepthTag">D:—</div>
@@ -728,7 +792,6 @@
       </div>
     </div>
 
-    <!-- Bottom player strip (White) -->
     <div class="player-strip active" id="stripWhite">
       <div class="player-info">
         <div class="player-avatar light" id="avatarWhite">♔</div>
@@ -747,7 +810,6 @@
       <div class="player-timer" id="timerWhite">--:--</div>
     </div>
 
-    <!-- Playback dock -->
     <div class="playback">
       <div class="playback-buttons">
         <button class="btn" id="first" title="First move">⏮</button>
@@ -767,7 +829,6 @@
 
   <aside class="sidebar">
 
-    <!-- Engine evaluation -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">Engine evaluation</span>
@@ -789,7 +850,6 @@
       </div>
     </div>
 
-    <!-- Top 3 lines -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">Engine's top 3 lines</span>
@@ -802,7 +862,6 @@
       </div>
     </div>
 
-    <!-- PGN -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">Enter your PGN here</span>
@@ -815,7 +874,6 @@
       </div>
     </div>
 
-    <!-- FEN -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">Enter your FEN here</span>
@@ -827,20 +885,40 @@
       </div>
     </div>
 
-    <!-- Moves -->
     <div class="card moves-card">
       <div class="card-header">
-        <span class="card-title">Your moves with classifications</span>
-        <span class="card-meta" id="movesMeta">—</span>
+        <span class="card-title">Your moves</span>
+        <div class="tab-switch">
+          <button id="tabPresentMove" class="active">Present</button>
+          <button id="tabMoveList">List</button>
+        </div>
       </div>
-      <div class="move-list" id="moveList">
-        <em style="color:#666; padding: 12px; display:block;">No game loaded</em>
+
+      <div id="presentMoveView" class="present-move">
+        <div class="hero-row">
+          <span class="hero-move-text" id="heroMoveText">—</span>
+          <div class="hero-badge hero-badge-empty" id="heroMoveBadge">·</div>
+        </div>
+        <div class="hero-meta">
+          <span class="ply-pill" id="heroPlyPill">Ply 0 / 0</span>
+          <span class="cls-pill" id="heroClsPill">—</span>
+        </div>
+        <div class="hero-nav">
+          <button id="heroPrev">⏪ Skip Back</button>
+          <button id="heroNext" class="primary">Move Once ⏩</button>
+        </div>
       </div>
+
+      <div id="moveListView" style="display:none;">
+        <div class="move-list" id="moveList">
+          <em style="color:#666; padding: 12px; display:block;">No game loaded</em>
+        </div>
+      </div>
+
       <button class="btn full primary" id="analyzeAllBtn" style="margin-top: 10px;" disabled>Analyze Full Game</button>
       <div id="analyzeAllStatus" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px;"></div>
     </div>
 
-    <!-- AI Explanation -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">AI Explanation</span>
@@ -877,9 +955,7 @@ window.addEventListener('chessjs-ready', () => {
   let game = new Chess();
   let history = [];
   let cursor = 0;
-
-  // Latest engine info for the current position (auto/manual eval)
-  let latestEngineInfo = { depth: null, nps: null, score: null, mate: null };
+  let movesViewMode = 'present'; // 'present' | 'list'
 
   function onDrop(source, target) {
     try {
@@ -911,7 +987,7 @@ window.addEventListener('chessjs-ready', () => {
 
     const size = overlay.parentElement.clientWidth;
     const sq = size / 8;
-    const badgeSize = 32;
+    const badgeSize = 26;
 
     const badge = document.createElement('div');
     badge.className = 'sq-badge cls-' + mv.cls;
@@ -936,8 +1012,6 @@ window.addEventListener('chessjs-ready', () => {
     const toFile   = uci.charCodeAt(2) - 97;
     const toRank   = parseInt(uci[3], 10) - 1;
 
-    // Board coords: 0..800 viewBox, 100 per square.
-    // Rank 8 at top, rank 1 at bottom.
     const sq = 100;
     const cx = (f) => f * sq + sq / 2;
     const cy = (r) => (7 - r) * sq + sq / 2;
@@ -947,7 +1021,6 @@ window.addEventListener('chessjs-ready', () => {
     const x2 = cx(toFile);
     const y2 = cy(toRank);
 
-    // Marker
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
       <marker id="arrowhead" markerWidth="6" markerHeight="6" orient="auto" refX="3.2" refY="3">
@@ -987,34 +1060,24 @@ window.addEventListener('chessjs-ready', () => {
 
   // ---------- Player strips ----------
   function renderPlayerStrips(pgnHeaders) {
-    // pgnHeaders is optional — { White, Black, WhiteElo, BlackElo, ... }
     const h = pgnHeaders || {};
-
     document.getElementById('nameWhite').textContent = h.White || 'White';
     document.getElementById('nameBlack').textContent = h.Black || 'Black';
     document.getElementById('eloWhite').textContent = h.WhiteElo ? 'ELO ' + h.WhiteElo : '—';
     document.getElementById('eloBlack').textContent = h.BlackElo ? 'ELO ' + h.BlackElo : '—';
-
-    // Timers — we don't parse time control yet, show placeholder
     document.getElementById('timerWhite').textContent = '--:--';
     document.getElementById('timerBlack').textContent = '--:--';
 
-    // Active strip = side to move
-    const turn = game.turn();
-    document.getElementById('stripWhite').classList.toggle('active', turn === 'w');
-    document.getElementById('stripBlack').classList.toggle('active', turn === 'b');
-
-    // Captured pieces
+    document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
+    document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
     renderCaptured();
   }
 
   function renderCaptured() {
-    // Compute captured pieces from the current position vs the starting set.
     const startCounts = {
       w: { p: 8, n: 2, b: 2, r: 2, q: 1 },
       b: { p: 8, n: 2, b: 2, r: 2, q: 1 }
     };
-
     const boardArr = game.board();
     const nowCounts = {
       w: { p: 0, n: 0, b: 0, r: 0, q: 0 },
@@ -1028,11 +1091,8 @@ window.addEventListener('chessjs-ready', () => {
       }
     }
 
-    // Captured = starting count - current count for each side.
-    // A capture of a White piece shows up on the "Black" strip (Black captured it).
-    const capturedByBlack = []; // White pieces missing
-    const capturedByWhite = []; // Black pieces missing
-
+    const capturedByBlack = [];
+    const capturedByWhite = [];
     const glyphs = { w: { p:'♙', n:'♘', b:'♗', r:'♖', q:'♕' }, b: { p:'♟', n:'♞', b:'♝', r:'♜', q:'♛' } };
 
     for (const type of ['q','r','b','n','p']) {
@@ -1045,7 +1105,6 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('capturedWhite').textContent = capturedByWhite.join('');
     document.getElementById('capturedBlack').textContent = capturedByBlack.join('');
 
-    // Material advantage
     const valW = nowCounts.w.q * 9 + nowCounts.w.r * 5 + nowCounts.w.b * 3 + nowCounts.w.n * 3 + nowCounts.w.p;
     const valB = nowCounts.b.q * 9 + nowCounts.b.r * 5 + nowCounts.b.b * 3 + nowCounts.b.n * 3 + nowCounts.b.p;
     const diff = valW - valB;
@@ -1069,7 +1128,7 @@ window.addEventListener('chessjs-ready', () => {
     }
   }
 
-  // ---------- Status / FEN display ----------
+  // ---------- Status ----------
   function renderStatus() {
     const turn = game.turn() === 'w' ? 'White' : 'Black';
     let msg = turn + ' to move';
@@ -1078,14 +1137,11 @@ window.addEventListener('chessjs-ready', () => {
     else if (game.isCheck()) msg = turn + ' is in check';
     document.getElementById('status').textContent = msg;
     document.getElementById('fenInline').textContent = game.fen();
-    document.getElementById('fenMeta').textContent = 'Live';
-
-    // Update active strip based on turn
     document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
-  // ---------- Moves list ----------
+  // ---------- Moves (list + hero) ----------
   function badgeFor(cls) {
     if (!cls) return '';
     return `<span class="badge cls-${cls}"></span>`;
@@ -1095,12 +1151,11 @@ window.addEventListener('chessjs-ready', () => {
     const el = document.getElementById('moveList');
     if (history.length === 0) {
       el.innerHTML = '<em style="color:#666; padding:12px; display:block;">No game loaded</em>';
-      document.getElementById('movesMeta').textContent = '—';
       document.getElementById('pgnPlies').textContent = '— plies';
+      renderHeroMove();
       return;
     }
     document.getElementById('pgnPlies').textContent = history.length + ' plies';
-    document.getElementById('movesMeta').textContent = history.length + ' moves';
 
     let html = '';
     for (let i = 0; i < history.length; i += 2) {
@@ -1122,11 +1177,55 @@ window.addEventListener('chessjs-ready', () => {
         if (idx > 0 && idx <= history.length) gotoPly(idx);
       };
     });
+
+    renderHeroMove();
+  }
+
+  function renderHeroMove() {
+    const heroText = document.getElementById('heroMoveText');
+    const heroBadge = document.getElementById('heroMoveBadge');
+    const plyPill = document.getElementById('heroPlyPill');
+    const clsPill = document.getElementById('heroClsPill');
+
+    if (history.length === 0 || cursor === 0) {
+      heroText.textContent = '—';
+      heroBadge.className = 'hero-badge hero-badge-empty';
+      heroBadge.textContent = '·';
+      heroBadge.style.backgroundImage = '';
+      plyPill.textContent = `Ply 0 / ${history.length}`;
+      clsPill.textContent = 'No move';
+      return;
+    }
+
+    const mv = history[cursor - 1];
+    heroText.textContent = mv.san;
+
+    // Reset any prior classes / inline image
+    heroBadge.className = 'hero-badge';
+    heroBadge.textContent = '';
+
+    if (mv.cls) {
+      heroBadge.classList.add('cls-' + mv.cls);
+      heroBadge.style.backgroundImage = `url('icons/${capitalize(mv.cls)}.png')`;
+    } else {
+      heroBadge.classList.add('hero-badge-empty');
+      heroBadge.textContent = '·';
+      heroBadge.style.backgroundImage = '';
+    }
+
+    plyPill.textContent = `Ply ${cursor} / ${history.length}`;
+    clsPill.textContent = mv.cls ? capitalize(mv.cls) : 'Unclassified';
+  }
+
+  function capitalize(s) {
+    return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
   function renderNavButtons() {
     ['first','prev'].forEach(id => document.getElementById(id).disabled = cursor === 0);
     ['next','last'].forEach(id => document.getElementById(id).disabled = cursor >= history.length);
+    document.getElementById('heroPrev').disabled = cursor === 0;
+    document.getElementById('heroNext').disabled = cursor >= history.length;
     document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
   }
 
@@ -1154,6 +1253,25 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('next').onclick  = () => gotoPly(cursor + 1);
   document.getElementById('last').onclick  = () => gotoPly(history.length);
 
+  document.getElementById('heroPrev').onclick = () => gotoPly(cursor - 1);
+  document.getElementById('heroNext').onclick = () => gotoPly(cursor + 1);
+
+  // Tab switching
+  document.getElementById('tabPresentMove').onclick = () => {
+    movesViewMode = 'present';
+    document.getElementById('tabPresentMove').classList.add('active');
+    document.getElementById('tabMoveList').classList.remove('active');
+    document.getElementById('presentMoveView').style.display = '';
+    document.getElementById('moveListView').style.display = 'none';
+  };
+  document.getElementById('tabMoveList').onclick = () => {
+    movesViewMode = 'list';
+    document.getElementById('tabMoveList').classList.add('active');
+    document.getElementById('tabPresentMove').classList.remove('active');
+    document.getElementById('moveListView').style.display = '';
+    document.getElementById('presentMoveView').style.display = 'none';
+  };
+
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key === 'ArrowLeft')  gotoPly(cursor - 1);
@@ -1167,7 +1285,6 @@ window.addEventListener('chessjs-ready', () => {
     try { g.loadPgn(text); }
     catch (err) { alert('Could not parse PGN: ' + err.message); return; }
 
-    // Extract headers for player strips
     const headers = g.header ? g.header() : {};
 
     const replay = new Chess();
@@ -1272,7 +1389,6 @@ window.addEventListener('chessjs-ready', () => {
         pvUci = parts.slice(pi + 1).filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
       }
 
-      // Depth / nps
       const di = parts.indexOf('depth');
       const depth = di !== -1 ? parseInt(parts[di + 1], 10) : null;
       const ni = parts.indexOf('nps');
@@ -1294,17 +1410,14 @@ window.addEventListener('chessjs-ready', () => {
           if (score !== null) evalText = formatScore('cp', score, turn);
           else if (mate !== null) evalText = formatScore('mate', mate, turn);
 
-          // Card + eval bar
           const scoreCard = document.getElementById('evalScoreCard');
           scoreCard.textContent = evalText;
           const isNeg = evalText.startsWith('-') || evalText.startsWith('-M');
           scoreCard.classList.toggle('neg', isNeg);
 
-          // Depth
           document.getElementById('evalDepthCard').textContent = depth !== null ? `${depth} / 60` : '—';
           document.getElementById('evalDepthTag').textContent = 'D:' + (depth !== null ? depth : '—');
 
-          // NPS
           if (nps !== null) {
             const mns = (nps / 1e6).toFixed(1);
             document.getElementById('evalNpsCard').textContent = `${nps.toLocaleString()} nps`;
@@ -1315,18 +1428,28 @@ window.addEventListener('chessjs-ready', () => {
           }
           document.getElementById('engineDepthChip').textContent = depth !== null ? depth : '—';
 
-          // Eval bar
-          const cpWhite = score !== null ? (turn === 'w' ? score : -score) : null;
-          if (cpWhite !== null) {
+          // Eval bar — White fills from TOP, height = White's share (0%..100%)
+          let whiteSharePct = 50;
+          if (score !== null) {
+            const cpWhite = turn === 'w' ? score : -score;
             const clamped = Math.max(-1000, Math.min(1000, cpWhite));
-            const pct = 50 - (clamped / 1000) * 45;
-            document.getElementById('evalFill').style.height = pct + '%';
-            document.getElementById('evalScoreTag').textContent = formatScore('cp', score, turn);
-            document.getElementById('evalScoreTag').classList.toggle('neg', pct > 50);
+            whiteSharePct = 50 - (clamped / 1000) * 45; // 5..95
           } else if (mate !== null) {
-            const pct = mate > 0 ? 98 : 2;
-            document.getElementById('evalFill').style.height = pct + '%';
-            document.getElementById('evalScoreTag').textContent = formatScore('mate', mate, turn);
+            const whiteMate = turn === 'w' ? mate : -mate;
+            whiteSharePct = whiteMate > 0 ? 98 : 2;
+          }
+          document.getElementById('evalFill').style.height = whiteSharePct + '%';
+
+          if (score !== null) {
+            const s = formatScore('cp', score, turn);
+            const tag = document.getElementById('evalScoreTag');
+            tag.textContent = s;
+            tag.classList.toggle('neg', s.startsWith('-'));
+          } else if (mate !== null) {
+            const s = formatScore('mate', mate, turn);
+            const tag = document.getElementById('evalScoreTag');
+            tag.textContent = s;
+            tag.classList.toggle('neg', s.startsWith('-'));
           }
 
           if (pvUci.length) {
@@ -1447,7 +1570,6 @@ window.addEventListener('chessjs-ready', () => {
     }, 150);
   }
 
-  // ---------- Win probability / material ----------
   function cpToWinProb(cp) { return 1 / (1 + Math.exp(-0.00368208 * cp)); }
 
   function materialCount(fen) {
@@ -1462,7 +1584,6 @@ window.addEventListener('chessjs-ready', () => {
     return { w, b };
   }
 
-  // ---------- Theory book ----------
   function isTheory(moveIndex, san) {
     const BOOK = [
       ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
@@ -1729,7 +1850,6 @@ window.addEventListener('chessjs-ready', () => {
     renderBoardOverlay();
   };
 
-  // ---------- AI Explanation ----------
   document.getElementById('aiExplainBtn').onclick = async () => {
     const model  = document.getElementById('aiModel').value;
     const output = document.getElementById('aiOutput');
