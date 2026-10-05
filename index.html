@@ -401,7 +401,7 @@
       <h3 style="margin-top:0;">AI Explanation</h3>
       <select id="aiModel">
         <option value="deepseek-v4.1-flash:free">deepseek-v4.1-flash:free</option>
-        <option value="qwen3.8-flash:free">qwen3.8-flash:free</option>
+        <option value="mimo-v2-flash:free">mimo-v2-flash:free</option>
       </select>
       <button id="aiExplainBtn">Explain Current Move</button>
       <div id="aiOutput"><em style="color:#999">Load a game, analyze it, then click a move and hit Explain.</em></div>
@@ -1309,7 +1309,8 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
           model: model,
           messages: [{ role: 'user', content: prompt }],
           max_tokens: 1500,
-          temperature: 0.7
+          temperature: 0.7,
+          enable_thinking: false
         })
       });
 
