@@ -1331,35 +1331,20 @@ window.addEventListener('chessjs-ready', () => {
 
   // ---------- Board animation helpers ----------
 
-  // Hide the chessboard.js piece rendered on a given square.
-  // Returns a function that restores its visibility.
+  // chessboard.js renders each square as a <div data-square="e4"> containing
+  // an <img> for the piece. Look up the piece image inside that square.
   function hidePieceAt(squareName) {
     const boardWrap = document.querySelector('.board-wrap');
     if (!boardWrap) return null;
-
-    const size = boardWrap.clientWidth;
-    const sq = size / 8;
-    const fileIdx = squareName.charCodeAt(0) - 97;
-    const rankIdx = 8 - parseInt(squareName[1], 10);
-    const targetX = fileIdx * sq;
-    const targetY = rankIdx * sq;
-
-    const pieces = boardWrap.querySelectorAll('img');
-    for (const img of pieces) {
-      const left = parseFloat(img.style.left);
-      const top  = parseFloat(img.style.top);
-      if (isNaN(left) || isNaN(top)) continue;
-      if (Math.abs(left - targetX) < 3 && Math.abs(top - targetY) < 3) {
-        const prev = img.style.visibility;
-        img.style.visibility = 'hidden';
-        return () => { img.style.visibility = prev || 'visible'; };
-      }
-    }
-    return null;
+    const squareEl = boardWrap.querySelector('[data-square="' + squareName + '"]');
+    if (!squareEl) return null;
+    const img = squareEl.querySelector('img');
+    if (!img) return null;
+    const prev = img.style.visibility;
+    img.style.visibility = 'hidden';
+    return () => { img.style.visibility = prev || 'visible'; };
   }
 
-  // Given two FENs and the color of the mover, return the list of
-  // { from, to, piece } movements performed by that side.
   function detectMoves(fromFen, toFen) {
     const parseBoard = (fen) => {
       const out = {};
@@ -1380,15 +1365,15 @@ window.addEventListener('chessjs-ready', () => {
     const from = parseBoard(fromFen);
     const to = parseBoard(toFen);
 
-    const moverColor = fromFen.split(' ')[1]; // 'w' or 'b'
+    const moverColor = fromFen.split(' ')[1];
     const isMoverPiece = (ch) => {
       if (!ch) return false;
       const isWhitePiece = ch === ch.toUpperCase();
       return moverColor === 'w' ? isWhitePiece : !isWhitePiece;
     };
 
-    const squaresGone = [];   // squares where a mover's piece used to be
-    const squaresArrived = []; // squares where a mover's piece now is
+    const squaresGone = [];
+    const squaresArrived = [];
 
     for (const sq in from) {
       if (!isMoverPiece(from[sq])) continue;
@@ -1404,7 +1389,6 @@ window.addEventListener('chessjs-ready', () => {
       k:'bK', q:'bQ', r:'bR', b:'bB', n:'bN', p:'bP'
     };
 
-    // Simple case: exactly one mover piece moved.
     if (squaresGone.length === 1 && squaresArrived.length === 1) {
       const fromSq = squaresGone[0];
       const toSq = squaresArrived[0];
@@ -1414,9 +1398,6 @@ window.addEventListener('chessjs-ready', () => {
       return [{ from: fromSq, to: toSq, piece }];
     }
 
-    // Castling: exactly two mover pieces moved, and they are a king + rook
-    // of the same color. Match each gone square to the nearest arrived
-    // square of the same piece type.
     if (squaresGone.length === 2 && squaresArrived.length === 2) {
       const moves = [];
       const remainingArrived = squaresArrived.slice();
@@ -1424,8 +1405,6 @@ window.addEventListener('chessjs-ready', () => {
         const pieceChar = from[fromSq];
         const piece = pieceMap[pieceChar];
         if (!piece) continue;
-        // Find an arrived square that now holds the same type of piece and
-        // is closest to fromSq.
         let bestIdx = -1;
         let bestDist = Infinity;
         for (let i = 0; i < remainingArrived.length; i++) {
@@ -1442,7 +1421,6 @@ window.addEventListener('chessjs-ready', () => {
       return moves;
     }
 
-    // Anything else (promotion, or unrecognized) — no animation.
     return [];
   }
 
@@ -1454,8 +1432,6 @@ window.addEventListener('chessjs-ready', () => {
     return Math.abs(f1 - f2) + Math.abs(r1 - r2);
   }
 
-  // Animate the piece(s) moving from `fromFen` to `toFen`. Calls onComplete
-  // once every flying piece has landed and the sources have been restored.
   function animatePieceMove(fromFen, toFen, onComplete) {
     if (!fromFen || !toFen || fromFen === toFen) {
       onComplete();
@@ -1484,8 +1460,6 @@ window.addEventListener('chessjs-ready', () => {
       const x2 = fileIdxTo * sq;
       const y2 = rankIdxTo * sq;
 
-      // Hide the underlying static piece at the source square so we don't
-      // see a ghost left behind.
       const restore = hidePieceAt(mv.from);
       if (restore) restoreFuncs.push(restore);
 
@@ -1502,10 +1476,8 @@ window.addEventListener('chessjs-ready', () => {
       flyingPieces.push({ el: flying, x2, y2 });
     }
 
-    // Force reflow so the initial transforms commit.
     void boardWrap.offsetWidth;
 
-    // Then trigger the transitions.
     requestAnimationFrame(() => {
       for (const fp of flyingPieces) {
         fp.el.style.transform = `translate(${fp.x2}px, ${fp.y2}px)`;
@@ -1523,8 +1495,6 @@ window.addEventListener('chessjs-ready', () => {
       onComplete();
     };
 
-    // Whichever transitionend fires first triggers finish; also a hard
-    // timeout as a safety net.
     if (flyingPieces.length) {
       flyingPieces[0].el.addEventListener('transitionend', finish);
     }
