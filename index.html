@@ -790,7 +790,6 @@
       transition: width 0.2s;
     }
 
-    /* ---------- Review screen ---------- */
     #review-screen {
       position: fixed;
       inset: 0;
@@ -860,7 +859,6 @@
       margin-top: 2px;
     }
 
-    /* Table: one row per classification, two count columns */
     .review-table {
       display: flex;
       flex-direction: column;
@@ -1332,18 +1330,9 @@ window.addEventListener('chessjs-ready', () => {
   }
 
   // ---------- Flying piece animation ----------
-  // Strategy: create a floating piece at the source square BEFORE the board
-  // updates. Then run board.position(). The board places the piece at the
-  // destination instantly, but the flying piece is on top of it and moves
-  // smoothly toward the destination. To avoid the "two pieces" artifact,
-  // we hide the destination's copy by starting the flying piece at the
-  // source and letting it arrive just as we remove it — and we delay the
-  // board update until the animation has visibly started, then the flying
-  // piece covers the destination.
-  //
-  // Simpler and artifact-free: animate, THEN update. This means the board
-  // shows the OLD position until the animation finishes. Choppy is better
-  // than duplicated.
+  // Finds the mover's piece that changed squares. Works for captures too,
+  // because we identify the piece by its side (the mover's color from the
+  // "from" position's turn field) and track where it went.
   function animatePieceMove(fromFen, toFen, onComplete) {
     if (!fromFen || !toFen || fromFen === toFen) {
       onComplete();
@@ -1369,25 +1358,50 @@ window.addEventListener('chessjs-ready', () => {
     const from = parseBoard(fromFen);
     const to = parseBoard(toFen);
 
-    const lostSquares = [];
-    const gainedSquares = [];
+    // Whose move was it? Read the "from" position's turn field.
+    const moverColor = fromFen.split(' ')[1];  // 'w' or 'b'
+    const isMoverPiece = (ch) => {
+      if (!ch) return false;
+      const isWhitePiece = ch === ch.toUpperCase();
+      return moverColor === 'w' ? isWhitePiece : !isWhitePiece;
+    };
+
+    // Find the mover's piece that disappeared from its old square,
+    // and where it reappeared.
+    let fromSq = null, toSq = null;
     for (const sq in from) {
-      if (to[sq] !== from[sq]) lostSquares.push(sq);
+      if (!isMoverPiece(from[sq])) continue;
+      // If this square no longer has the same piece, the piece left here
+      if (to[sq] !== from[sq]) {
+        fromSq = sq;
+      }
     }
     for (const sq in to) {
-      if (from[sq] !== to[sq]) gainedSquares.push(sq);
+      if (!isMoverPiece(to[sq])) continue;
+      // If this square has a mover's piece that wasn't here before, it arrived here
+      if (from[sq] !== to[sq]) {
+        // But we need to make sure it's not the same piece sitting still
+        // — check that from[sq] wasn't already this piece
+        toSq = sq;
+      }
     }
 
-    // Only animate simple single-piece moves (skip castling/promotion).
-    if (lostSquares.length !== 1 || gainedSquares.length !== 1) {
-      onComplete();
-      return;
-    }
+    // Handle promotion: the pawn moved but the piece that arrived is not
+    // the same type. In that case we can't match easily; just skip animation.
+    if (!fromSq || !toSq) { onComplete(); return; }
 
-    const fromSq = lostSquares[0];
-    const toSq = gainedSquares[0];
+    // Castling: two mover pieces move. fromSq/toSq will be whichever the
+    // loop hit last (arbitrary). Skip animation to avoid the wrong piece
+    // sliding.
+    // Detect castling by checking if two of the mover's pieces changed squares.
+    let moverPiecesMoved = 0;
+    for (const sq in from) {
+      if (!isMoverPiece(from[sq])) continue;
+      if (to[sq] !== from[sq]) moverPiecesMoved++;
+    }
+    if (moverPiecesMoved > 1) { onComplete(); return; }
+
     const pieceChar = to[toSq];
-
     const pieceMap = {
       K:'wK', Q:'wQ', R:'wR', B:'wB', N:'wN', P:'wP',
       k:'bK', q:'bQ', r:'bR', b:'bB', n:'bN', p:'bP'
@@ -1420,16 +1434,12 @@ window.addEventListener('chessjs-ready', () => {
     flying.style.transform = `translate(${x1}px, ${y1}px)`;
     boardWrap.appendChild(flying);
 
-    // Force reflow so the browser commits the initial transform.
     void flying.offsetWidth;
 
-    // Now animate to the destination.
     requestAnimationFrame(() => {
       flying.style.transform = `translate(${x2}px, ${y2}px)`;
     });
 
-    // Once the animation is over, remove the flying piece and update the
-    // board so the destination square shows the real piece in place.
     let done = false;
     const finish = () => {
       if (done) return;
@@ -1438,7 +1448,6 @@ window.addEventListener('chessjs-ready', () => {
       onComplete();
     };
     flying.addEventListener('transitionend', finish);
-    // Fallback: in case transitionend doesn't fire, force it after 320ms.
     setTimeout(finish, 320);
   }
 
@@ -2238,10 +2247,7 @@ window.addEventListener('chessjs-ready', () => {
     return 'blunder';
   }
 
-  // ---------- Accuracy ----------
-  // Uses average centipawn loss with outlier capping so a single blunder
-  // doesn't tank an otherwise clean game's score.
-  const CP_LOSS_CAP = 400;   // individual moves can't contribute more than 400cp
+  const CP_LOSS_CAP = 400;
 
   function cpLossToAccuracy(avgCpLoss) {
     const a = 103.1668 * Math.exp(-0.04354 * avgCpLoss / 10) - 3.1669;
@@ -2288,7 +2294,6 @@ window.addEventListener('chessjs-ready', () => {
     if (acc.black !== null) { bEl.textContent = acc.black.toFixed(1) + '% acc'; bEl.classList.add('show'); }
   }
 
-  // ---------- Review screen ----------
   function showReviewScreen() {
     const acc = computeAccuracy();
     const counts = computeClassificationCounts();
@@ -2306,14 +2311,12 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('reviewAccValueWhite').classList.toggle('bad', acc.white !== null && acc.white < 70);
     document.getElementById('reviewAccValueBlack').classList.toggle('bad', acc.black !== null && acc.black < 70);
 
-    // Header row with player names
     let html = `<div class="review-header-row">
       <div class="h-label">Classification</div>
       <div class="h-white">${whiteName}</div>
       <div class="h-black">${blackName}</div>
     </div>`;
 
-    // One row per classification, White's count and Black's count side-by-side
     for (const cls of CLASSIFICATIONS) {
       const wCount = counts.white[cls];
       const bCount = counts.black[cls];
