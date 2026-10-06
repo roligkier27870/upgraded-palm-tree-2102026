@@ -56,7 +56,6 @@
       --font-display: 'Space Grotesk', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-      /* classification colors — matching chess.com palette */
       --cls-brilliant: #26c2a3;
       --cls-great: #749bbf;
       --cls-best: #7fb85c;
@@ -367,8 +366,8 @@
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
-      transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
       will-change: transform;
+      transition: transform 0.28s cubic-bezier(0.33, 1, 0.68, 1);
     }
 
     .playback {
@@ -743,7 +742,6 @@
     }
     .ai-output em { color: var(--outline); }
 
-    /* ---------- Analyzing overlay ---------- */
     #analyzing-overlay {
       position: fixed;
       inset: 0;
@@ -804,10 +802,7 @@
       overflow-y: auto;
     }
     #review-screen.active { display: block; }
-    .review-inner {
-      max-width: 720px;
-      margin: 0 auto;
-    }
+    .review-inner { max-width: 720px; margin: 0 auto; }
     .review-title {
       font-family: var(--font-display);
       font-weight: 700;
@@ -837,8 +832,6 @@
       background: rgba(28,32,40,0.9);
       border: 2px solid rgba(60,74,66,0.3);
     }
-    .review-acc-card.white-win { border-color: rgba(255,255,255,0.35); }
-    .review-acc-card.black-win { border-color: rgba(78,222,163,0.5); }
     .review-acc-name {
       font-family: var(--font-display);
       font-weight: 600;
@@ -867,18 +860,47 @@
       margin-top: 2px;
     }
 
+    /* Table: one row per classification, two count columns */
     .review-table {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0 24px;
+      display: flex;
+      flex-direction: column;
       background: rgba(28,32,40,0.6);
       border: 1px solid rgba(60,74,66,0.25);
       border-radius: 10px;
-      padding: 14px 20px;
+      padding: 6px 20px;
     }
+    .review-header-row {
+      display: grid;
+      grid-template-columns: 1fr 60px 60px;
+      padding: 10px 0 6px;
+      border-bottom: 1px solid rgba(60,74,66,0.4);
+      margin-bottom: 2px;
+    }
+    .review-header-row .h-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--outline);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .review-header-row .h-white,
+    .review-header-row .h-black {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-variant);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .review-header-row .h-white { color: #f1f1ee; }
+    .review-header-row .h-black { color: var(--text-variant); }
     .review-row {
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: 1fr 60px 60px;
       align-items: center;
       padding: 7px 0;
       border-bottom: 1px solid rgba(44,49,59,0.6);
@@ -902,6 +924,7 @@
       font-weight: 500;
     }
     .review-row .count {
+      text-align: right;
       font-weight: 700;
       color: var(--text);
     }
@@ -919,7 +942,6 @@
       font-weight: 600;
     }
 
-    /* classification dot colors (matches the labels) */
     .dot-brilliant  { background: var(--cls-brilliant); }
     .dot-great      { background: var(--cls-great); }
     .dot-best       { background: var(--cls-best); }
@@ -1141,7 +1163,6 @@
 
 </div>
 
-<!-- Analyzing overlay: hides the board so the user isn't spoiled -->
 <div id="analyzing-overlay">
   <div class="analysis-spinner"></div>
   <div class="analysis-text">Analyzing game…</div>
@@ -1149,7 +1170,6 @@
   <div class="analysis-progress"><span id="analysisProgressBar"></span></div>
 </div>
 
-<!-- Review screen: shows after analysis finishes -->
 <div id="review-screen">
   <div class="review-inner">
     <h1 class="review-title">Game Review</h1>
@@ -1168,9 +1188,7 @@
       </div>
     </div>
 
-    <div class="review-table" id="reviewTable">
-      <!-- rows are injected here -->
-    </div>
+    <div class="review-table" id="reviewTable"></div>
 
     <div class="review-buttons">
       <button class="btn primary" id="reviewNext">Next ▶</button>
@@ -1217,7 +1235,6 @@ window.addEventListener('chessjs-ready', () => {
   let movesViewMode = 'present';
   let currentPgnHeaders = {};
 
-  // Track the previous FEN so we can compute the piece that moved for animation
   let previousFen = game.fen();
 
   function onDrop(source, target) {
@@ -1315,14 +1332,24 @@ window.addEventListener('chessjs-ready', () => {
   }
 
   // ---------- Flying piece animation ----------
-  // Detects which piece moved between the previous and current FEN and slides
-  // a floating image from source to destination square. Runs as a visual
-  // overlay — the underlying board has already updated, so if the animation
-  // fails the position is still correct.
-  function animatePieceMove(fromFen, toFen) {
-    if (!fromFen || !toFen || fromFen === toFen) return;
+  // Strategy: create a floating piece at the source square BEFORE the board
+  // updates. Then run board.position(). The board places the piece at the
+  // destination instantly, but the flying piece is on top of it and moves
+  // smoothly toward the destination. To avoid the "two pieces" artifact,
+  // we hide the destination's copy by starting the flying piece at the
+  // source and letting it arrive just as we remove it — and we delay the
+  // board update until the animation has visibly started, then the flying
+  // piece covers the destination.
+  //
+  // Simpler and artifact-free: animate, THEN update. This means the board
+  // shows the OLD position until the animation finishes. Choppy is better
+  // than duplicated.
+  function animatePieceMove(fromFen, toFen, onComplete) {
+    if (!fromFen || !toFen || fromFen === toFen) {
+      onComplete();
+      return;
+    }
 
-    // Find the piece that disappeared and reappeared on a different square.
     const parseBoard = (fen) => {
       const out = {};
       const ranks = fen.split(' ')[0].split('/');
@@ -1342,36 +1369,34 @@ window.addEventListener('chessjs-ready', () => {
     const from = parseBoard(fromFen);
     const to = parseBoard(toFen);
 
-    // Find squares that lost a piece and squares that gained one
     const lostSquares = [];
     const gainedSquares = [];
     for (const sq in from) {
-      if (to[sq] !== from[sq]) {
-        // Check if the piece at `sq` still exists somewhere else
-        lostSquares.push(sq);
-      }
+      if (to[sq] !== from[sq]) lostSquares.push(sq);
     }
     for (const sq in to) {
-      if (from[sq] !== to[sq]) {
-        gainedSquares.push(sq);
-      }
+      if (from[sq] !== to[sq]) gainedSquares.push(sq);
     }
 
-    if (lostSquares.length !== 1 || gainedSquares.length !== 1) return;
+    // Only animate simple single-piece moves (skip castling/promotion).
+    if (lostSquares.length !== 1 || gainedSquares.length !== 1) {
+      onComplete();
+      return;
+    }
+
     const fromSq = lostSquares[0];
     const toSq = gainedSquares[0];
     const pieceChar = to[toSq];
 
-    // Map FEN char to our PNG piece codes
     const pieceMap = {
       K:'wK', Q:'wQ', R:'wR', B:'wB', N:'wN', P:'wP',
       k:'bK', q:'bQ', r:'bR', b:'bB', n:'bN', p:'bP'
     };
     const piece = pieceMap[pieceChar];
-    if (!piece) return;
+    if (!piece) { onComplete(); return; }
 
     const boardWrap = document.querySelector('.board-wrap');
-    if (!boardWrap) return;
+    if (!boardWrap) { onComplete(); return; }
     const size = boardWrap.clientWidth;
     const sq = size / 8;
 
@@ -1385,7 +1410,6 @@ window.addEventListener('chessjs-ready', () => {
     const x2 = fileIdxTo * sq;
     const y2 = rankIdxTo * sq;
 
-    // Create the flying piece at the source square
     const flying = document.createElement('div');
     flying.id = 'flying-piece';
     flying.style.width = sq + 'px';
@@ -1396,29 +1420,47 @@ window.addEventListener('chessjs-ready', () => {
     flying.style.transform = `translate(${x1}px, ${y1}px)`;
     boardWrap.appendChild(flying);
 
-    // Force a reflow so the initial transform takes effect
+    // Force reflow so the browser commits the initial transform.
     void flying.offsetWidth;
 
-    // Trigger the transition to the destination
+    // Now animate to the destination.
     requestAnimationFrame(() => {
       flying.style.transform = `translate(${x2}px, ${y2}px)`;
     });
 
-    // Remove after the animation completes
-    setTimeout(() => {
+    // Once the animation is over, remove the flying piece and update the
+    // board so the destination square shows the real piece in place.
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
       if (flying.parentNode) flying.parentNode.removeChild(flying);
-    }, 260);
+      onComplete();
+    };
+    flying.addEventListener('transitionend', finish);
+    // Fallback: in case transitionend doesn't fire, force it after 320ms.
+    setTimeout(finish, 320);
   }
 
-  function renderBoard() {
+  function renderBoard(options) {
+    options = options || {};
     const newFen = game.fen();
-    // Animate the move that just happened
-    animatePieceMove(previousFen, newFen);
-    previousFen = newFen;
+    const skipAnimation = !!options.skipAnimation;
 
-    board.position(newFen, false);
-    renderBoardOverlay();
-    renderArrow();
+    if (skipAnimation) {
+      previousFen = newFen;
+      board.position(newFen, false);
+      renderBoardOverlay();
+      renderArrow();
+      return;
+    }
+
+    animatePieceMove(previousFen, newFen, () => {
+      previousFen = newFen;
+      board.position(newFen, false);
+      renderBoardOverlay();
+      renderArrow();
+    });
   }
 
   function renderPlayerStrips(pgnHeaders) {
@@ -1588,8 +1630,8 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
   }
 
-  function renderAll() {
-    renderBoard();
+  function renderAll(options) {
+    renderBoard(options);
     renderStatus();
     renderMoves();
     renderNavButtons();
@@ -1661,9 +1703,9 @@ window.addEventListener('chessjs-ready', () => {
     history = newHistory;
     cursor = history.length;
     game = replay;
-    previousFen = replay.fen();  // don't animate on load
+    previousFen = replay.fen();
     renderPlayerStrips(headers);
-    renderAll();
+    renderAll({ skipAnimation: true });
   };
 
   document.getElementById('loadFen').onclick = () => {
@@ -1674,7 +1716,7 @@ window.addEventListener('chessjs-ready', () => {
     history = []; cursor = 0;
     previousFen = game.fen();
     renderPlayerStrips({});
-    renderAll();
+    renderAll({ skipAnimation: true });
   };
 
   document.getElementById('loadStart').onclick = () => {
@@ -1689,7 +1731,7 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('accWhite').textContent = '';
     document.getElementById('accBlack').textContent = '';
     renderPlayerStrips({});
-    renderAll();
+    renderAll({ skipAnimation: true });
   };
 
   let sf = null;
@@ -2145,6 +2187,9 @@ window.addEventListener('chessjs-ready', () => {
     if (!mv) return;
     const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    mv.moverIsWhite = moverIsWhite;
+
     if (isForced(index)) { mv.cls = 'forced'; mv.cpLoss = 0; mv.winDrop = 0; return; }
     if (isTheory(index, mv.san)) { mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0; return; }
 
@@ -2155,12 +2200,10 @@ window.addEventListener('chessjs-ready', () => {
       (mv.uci.length === 4 || mv.uci[4] === pre.bestUci[4]);
     const post = await requestEval(fenAfter, depth, null, 1);
     if (!post || post.cpWhite === null) return;
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
     const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
     mv.evalBefore = preCpMover;
     mv.evalAfter  = postCpMover;
-    mv.moverIsWhite = moverIsWhite;
     const clamp = v => Math.max(-1000, Math.min(1000, v));
     const preWin  = cpToWinProb(clamp(preCpMover));
     const postWin = cpToWinProb(clamp(postCpMover));
@@ -2195,6 +2238,11 @@ window.addEventListener('chessjs-ready', () => {
     return 'blunder';
   }
 
+  // ---------- Accuracy ----------
+  // Uses average centipawn loss with outlier capping so a single blunder
+  // doesn't tank an otherwise clean game's score.
+  const CP_LOSS_CAP = 400;   // individual moves can't contribute more than 400cp
+
   function cpLossToAccuracy(avgCpLoss) {
     const a = 103.1668 * Math.exp(-0.04354 * avgCpLoss / 10) - 3.1669;
     return Math.max(0, Math.min(100, a));
@@ -2206,8 +2254,9 @@ window.addEventListener('chessjs-ready', () => {
     for (const mv of history) {
       if (mv.cpLoss === null || mv.cpLoss === undefined) continue;
       if (mv.moverIsWhite === null || mv.moverIsWhite === undefined) continue;
-      if (mv.moverIsWhite) { wTotal += mv.cpLoss; wCount++; }
-      else                 { bTotal += mv.cpLoss; bCount++; }
+      const capped = Math.min(mv.cpLoss, CP_LOSS_CAP);
+      if (mv.moverIsWhite) { wTotal += capped; wCount++; }
+      else                 { bTotal += capped; bCount++; }
     }
     const wAvg = wCount ? wTotal / wCount : 0;
     const bAvg = bCount ? bTotal / bCount : 0;
@@ -2222,7 +2271,8 @@ window.addEventListener('chessjs-ready', () => {
     const black = {};
     for (const c of CLASSIFICATIONS) { white[c] = 0; black[c] = 0; }
     for (const mv of history) {
-      if (!mv.cls || mv.moverIsWhite === null || mv.moverIsWhite === undefined) continue;
+      if (!mv.cls) continue;
+      if (mv.moverIsWhite === null || mv.moverIsWhite === undefined) continue;
       if (CLASSIFICATIONS.indexOf(mv.cls) === -1) continue;
       if (mv.moverIsWhite) white[mv.cls]++;
       else                 black[mv.cls]++;
@@ -2253,29 +2303,27 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('reviewAccValueBlack').textContent =
       acc.black !== null ? acc.black.toFixed(1) : '—';
 
-    // Color the accuracy box red if under 70%, green-ish if above
     document.getElementById('reviewAccValueWhite').classList.toggle('bad', acc.white !== null && acc.white < 70);
     document.getElementById('reviewAccValueBlack').classList.toggle('bad', acc.black !== null && acc.black < 70);
 
-    const table = document.getElementById('reviewTable');
-    let html = '';
+    // Header row with player names
+    let html = `<div class="review-header-row">
+      <div class="h-label">Classification</div>
+      <div class="h-white">${whiteName}</div>
+      <div class="h-black">${blackName}</div>
+    </div>`;
+
+    // One row per classification, White's count and Black's count side-by-side
     for (const cls of CLASSIFICATIONS) {
       const wCount = counts.white[cls];
       const bCount = counts.black[cls];
       html += `<div class="review-row">
         <div class="label"><span class="dot dot-${cls}"></span><span class="name">${CLS_LABELS[cls]}</span></div>
         <div class="count ${wCount === 0 ? 'zero' : ''}">${wCount}</div>
-      </div>`;
-    }
-    for (const cls of CLASSIFICATIONS) {
-      const wCount = counts.white[cls];
-      const bCount = counts.black[cls];
-      html += `<div class="review-row">
-        <div class="label"><span class="dot dot-${cls}"></span><span class="name">${CLS_LABELS[cls]}</span></div>
         <div class="count ${bCount === 0 ? 'zero' : ''}">${bCount}</div>
       </div>`;
     }
-    table.innerHTML = html;
+    document.getElementById('reviewTable').innerHTML = html;
 
     document.getElementById('reviewSub').textContent =
       `${whiteName} (White)  vs  ${blackName} (Black)  ·  ${history.length} plies`;
@@ -2286,16 +2334,14 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('reviewNext').onclick = () => {
     document.getElementById('review-screen').classList.remove('active');
     updateAccuracyDisplay();
-    gotoPly(0);  // rewind to start so the user can step through
+    gotoPly(0);
   };
 
-  // ---------- Analyze Full Game ----------
   document.getElementById('analyzeAllBtn').onclick = async () => {
     if (analyzingAll || !sfReady || history.length === 0) return;
     analyzingAll = true;
     document.getElementById('analyzeAllBtn').disabled = true;
 
-    // Show the "hiding" overlay so the user doesn't see classifications mid-run
     const overlay = document.getElementById('analyzing-overlay');
     overlay.classList.add('active');
     document.getElementById('analysisProgressBar').style.width = '0%';
@@ -2314,14 +2360,11 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('analyzeAllBtn').disabled = false;
     document.getElementById('analyzeAllStatus').textContent = 'Done.';
 
-    // Hide the overlay
     overlay.classList.remove('active');
 
-    // Render the board / moves behind the scenes (they'll be hidden by review screen anyway)
     renderMoves();
     renderBoardOverlay();
 
-    // Show the review screen
     showReviewScreen();
   };
 
@@ -2376,7 +2419,7 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
   window.addEventListener('resize', () => { renderBoardOverlay(); renderArrow(); });
 
   renderPlayerStrips({});
-  renderAll();
+  renderAll({ skipAnimation: true });
   initStockfish();
 
   window.getGame = () => game;
@@ -2388,6 +2431,7 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
   window.isMiss = isMiss;
   window.materialCount = materialCount;
   window.computeAccuracy = computeAccuracy;
+  window.computeClassificationCounts = computeClassificationCounts;
 
 });
 </script>
