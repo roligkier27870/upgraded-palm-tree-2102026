@@ -55,6 +55,19 @@
       --font-body: 'Outfit', system-ui, sans-serif;
       --font-display: 'Space Grotesk', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+      /* classification colors — matching chess.com palette */
+      --cls-brilliant: #26c2a3;
+      --cls-great: #749bbf;
+      --cls-best: #7fb85c;
+      --cls-excellent: #95b776;
+      --cls-good: #95b776;
+      --cls-theory: #a88865;
+      --cls-inaccuracy: #f7c631;
+      --cls-mistake: #e58f2a;
+      --cls-miss: #ff7b8a;
+      --cls-blunder: #ca3431;
+      --cls-forced: #8a8a8a;
     }
 
     html, body { margin: 0; padding: 0; min-height: 100%; }
@@ -253,7 +266,6 @@
       width: 100%;
     }
 
-    /* White at bottom, black at top — matching standard chess.com orientation */
     .eval-bar {
       width: 34px;
       border-radius: 6px;
@@ -348,10 +360,15 @@
       pointer-events: none;
       z-index: 9;
     }
-
-    .board-b72b1 .piece-417db,
-    .board-b72b1 img[data-piece] {
-      transition: transform 0.18s ease-out;
+    #flying-piece {
+      position: absolute;
+      pointer-events: none;
+      z-index: 20;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      will-change: transform;
     }
 
     .playback {
@@ -726,1244 +743,175 @@
     }
     .ai-output em { color: var(--outline); }
 
-    @media (max-width: 1100px) {
-      .app { grid-template-columns: 1fr; }
-      .sidebar { border-left: 0; border-top: 1px solid var(--line); padding: 20px; }
-      .main { padding: 16px; }
+    /* ---------- Analyzing overlay ---------- */
+    #analyzing-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10,14,22,0.9);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+    #analyzing-overlay.active { display: flex; }
+    .analysis-spinner {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 3px solid rgba(78,222,163,0.2);
+      border-top-color: var(--primary);
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .analysis-text {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--text);
+    }
+    .analysis-sub {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-variant);
+    }
+    .analysis-progress {
+      width: 280px;
+      height: 4px;
+      background: var(--surface-highest);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .analysis-progress span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--primary);
+      transition: width 0.2s;
     }
 
-    .board-b72b1 { border: none !important; border-radius: 8px; overflow: hidden; }
-    .board-b72b1 .white-1e1d7 { background-color: #f0d9b5 !important; color: #b58863 !important; }
-    .board-b72b1 .black-3c85d { background-color: #b58863 !important; color: #f0d9b5 !important; }
-  </style>
-</head>
-<body>
-
-<div class="app">
-
-  <main class="main">
-
-    <div class="topbar">
-      <div class="brand">
-        <div class="logo">♞</div>
-        <span>Chess Analyzer <span class="accent">/ Engine</span></span>
-      </div>
-      <div class="engine-chip">
-        <span class="dot"></span>
-        <span class="val-secondary" id="engineVersion">Stockfish 18 Lite</span>
-        <span class="sep">|</span>
-        <span>Depth <span class="val-primary" id="engineDepthChip">—</span></span>
-        <span class="sep">·</span>
-        <span><span class="val-primary" id="engineNpsChip">—</span> Mn/s</span>
-      </div>
-    </div>
-
-    <div class="player-strip" id="stripBlack">
-      <div class="player-info">
-        <div class="player-avatar dark" id="avatarBlack">♚</div>
-        <div class="player-names">
-          <div class="player-name-row">
-            <span class="player-name" id="nameBlack">Black</span>
-            <span class="player-elo" id="eloBlack">—</span>
-            <span class="player-accuracy" id="accBlack"></span>
-            <span class="player-country" id="countryBlack"></span>
-          </div>
-          <div class="player-captured">
-            <span id="capturedBlack"></span>
-            <span class="captured-adv" id="advBlack" style="display:none"></span>
-          </div>
-        </div>
-      </div>
-      <div class="player-timer" id="timerBlack">--:--</div>
-    </div>
-
-    <div class="board-shell">
-      <div class="eval-bar">
-        <div class="depth-tag" id="evalDepthTag">D:—</div>
-        <div class="eval-fill" id="evalFill"></div>
-        <div class="score-tag" id="evalScoreTag">+0.00</div>
-      </div>
-      <div class="board-wrap">
-        <div id="board"></div>
-        <svg id="arrow-svg" viewBox="0 0 800 800" preserveAspectRatio="none"></svg>
-        <div id="board-overlay"></div>
-      </div>
-    </div>
-
-    <div class="player-strip active" id="stripWhite">
-      <div class="player-info">
-        <div class="player-avatar light" id="avatarWhite">♔</div>
-        <div class="player-names">
-          <div class="player-name-row">
-            <span class="player-name" id="nameWhite">White</span>
-            <span class="player-elo" id="eloWhite">—</span>
-            <span class="player-accuracy" id="accWhite"></span>
-            <span class="player-country" id="countryWhite"></span>
-          </div>
-          <div class="player-captured">
-            <span id="capturedWhite"></span>
-            <span class="captured-adv" id="advWhite" style="display:none"></span>
-          </div>
-        </div>
-      </div>
-      <div class="player-timer" id="timerWhite">--:--</div>
-    </div>
-
-    <div class="playback">
-      <div class="playback-buttons">
-        <button class="btn" id="first" title="First move">⏮</button>
-        <button class="btn" id="prev" title="Previous">◀</button>
-        <button class="btn" id="next" title="Next">▶</button>
-        <button class="btn" id="last" title="Last move">⏭</button>
-      </div>
-      <div class="fen-inline">
-        <span class="label">FEN:</span>
-        <span class="value" id="fenInline">—</span>
-      </div>
-    </div>
-
-    <div class="status-line" id="status">White to move</div>
-
-  </main>
-
-  <aside class="sidebar">
-
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Engine evaluation</span>
-        <span class="card-meta" id="engineStatusCard">Loading…</span>
-      </div>
-      <div class="eval-rows">
-        <div class="eval-row">
-          <span class="k">Score</span>
-          <span class="v big" id="evalScoreCard">—</span>
-        </div>
-        <div class="eval-row">
-          <span class="k">Depth</span>
-          <span class="v" id="evalDepthCard">—</span>
-        </div>
-        <div class="eval-row">
-          <span class="k">Compute</span>
-          <span class="v accent" id="evalNpsCard">—</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Engine's top 3 lines</span>
-        <span class="card-meta">Multi-PV</span>
-      </div>
-      <div class="pv-list" id="multiPv">
-        <div class="pv-line empty"><span class="idx">1.</span><span class="moves">waiting…</span><span class="score">—</span></div>
-        <div class="pv-line empty"><span class="idx">2.</span><span class="moves">waiting…</span><span class="score">—</span></div>
-        <div class="pv-line empty"><span class="idx">3.</span><span class="moves">waiting…</span><span class="score">—</span></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Enter your PGN here</span>
-        <span class="card-meta" id="pgnPlies">— plies</span>
-      </div>
-      <textarea id="pgnInput" placeholder="1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
-      <div class="row">
-        <button class="btn" id="loadPgn">Load PGN</button>
-        <button class="btn" id="loadStart">Reset</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Enter your FEN here</span>
-        <span class="card-meta" id="fenMeta">Live</span>
-      </div>
-      <input type="text" id="fenInput" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">
-      <div class="row">
-        <button class="btn" id="loadFen">Load FEN</button>
-      </div>
-    </div>
-
-    <div class="card moves-card">
-      <div class="card-header">
-        <span class="card-title">Your moves</span>
-        <div class="tab-switch">
-          <button id="tabPresentMove" class="active">Present</button>
-          <button id="tabMoveList">List</button>
-        </div>
-      </div>
-
-      <div id="presentMoveView" class="present-move">
-        <div class="hero-row">
-          <span class="hero-move-text" id="heroMoveText">—</span>
-          <div class="hero-badge hero-badge-empty" id="heroMoveBadge">·</div>
-        </div>
-        <div class="hero-meta">
-          <span class="ply-pill" id="heroPlyPill">Ply 0 / 0</span>
-          <span class="cls-pill" id="heroClsPill">—</span>
-        </div>
-        <div class="hero-nav">
-          <button id="heroPrev">⏪ Skip Back</button>
-          <button id="heroNext" class="primary">Move Once ⏩</button>
-        </div>
-      </div>
-
-      <div id="moveListView" style="display:none;">
-        <div class="move-list" id="moveList">
-          <em style="color:#666; padding: 12px; display:block;">No game loaded</em>
-        </div>
-      </div>
-
-      <button class="btn full primary" id="analyzeAllBtn" style="margin-top: 10px;" disabled>Analyze Full Game</button>
-      <div id="analyzeAllStatus" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px;"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">AI Explanation</span>
-        <span class="card-meta">DeepSeek / MiMo</span>
-      </div>
-      <select id="aiModel">
-        <option value="deepseek-v4.1-flash:free">deepseek-v4.1-flash:free</option>
-        <option value="mimo-v2.6-flash:free">mimo-v2.6-flash:free</option>
-      </select>
-      <button class="btn full primary" id="aiExplainBtn" style="margin-top: 8px;">Explain Current Move</button>
-      <div class="ai-output" id="aiOutput"><em>Load a game, analyze it, then click a move and hit Explain.</em></div>
-    </div>
-
-  </aside>
-
-</div>
-
-<script>
-window.addEventListener('chessjs-ready', () => {
-
-  const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
-  const PROXY_URL = 'https://chess-analyzer-proxy.ju4nit3r78.workers.dev';
-
-  const board = Chessboard('board', {
-    draggable: true,
-    position: 'start',
-    pieceTheme: 'icons/{piece}.png',
-    dropOffBoard: 'snapback',
-    onDrop: onDrop,
-    onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); renderArrow(); }
-  });
-
-  let game = new Chess();
-  let history = [];
-  let cursor = 0;
-  let movesViewMode = 'present';
-
-  function onDrop(source, target) {
-    try {
-      const move = game.move({ from: source, to: target, promotion: 'q' });
-      history = history.slice(0, cursor);
-      history.push({
-        san: move.san, fen: game.fen(),
-        uci: move.from + move.to + (move.promotion || ''),
-        cls: null, cpLoss: null, winDrop: null,
-        evalBefore: null, evalAfter: null,
-        moverIsWhite: null
-      });
-      cursor = history.length;
-      renderAll();
-    } catch (e) { return 'snapback'; }
-  }
-
-  function renderBoardOverlay() {
-    const overlay = document.getElementById('board-overlay');
-    if (!overlay) return;
-    overlay.innerHTML = '';
-    if (cursor === 0) return;
-    const mv = history[cursor - 1];
-    if (!mv || !mv.cls) return;
-
-    const dest = mv.uci.slice(2, 4);
-    const fileIdx = dest.charCodeAt(0) - 'a'.charCodeAt(0);
-    const rankIdx = 8 - parseInt(dest[1], 10);
-
-    const size = overlay.parentElement.clientWidth;
-    const sq = size / 8;
-    const badgeSize = 26;
-
-    const badge = document.createElement('div');
-    badge.className = 'sq-badge cls-' + mv.cls;
-    badge.style.left = (fileIdx * sq + sq - badgeSize) + 'px';
-    badge.style.top  = (rankIdx * sq) + 'px';
-    badge.title = mv.cls;
-    overlay.appendChild(badge);
-  }
-
-  function renderArrow() {
-    const svg = document.getElementById('arrow-svg');
-    if (!svg) return;
-    svg.innerHTML = '';
-
-    if (!lastPvUci || !lastPvUci.length) return;
-    const uci = lastPvUci[0];
-    if (!/^[a-h][1-8][a-h][1-8]/.test(uci)) return;
-
-    const fromFile = uci.charCodeAt(0) - 97;
-    const fromRank = parseInt(uci[1], 10) - 1;
-    const toFile   = uci.charCodeAt(2) - 97;
-    const toRank   = parseInt(uci[3], 10) - 1;
-
-    const sq = 100;
-    const cx = (f) => f * sq + sq / 2;
-    const cy = (r) => (7 - r) * sq + sq / 2;
-
-    const x1 = cx(fromFile);
-    const y1 = cy(fromRank);
-    const x2 = cx(toFile);
-    const y2 = cy(toRank);
-
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    defs.innerHTML = `
-      <marker id="arrowhead" markerWidth="6" markerHeight="6" orient="auto" refX="3.2" refY="3">
-        <polygon points="0 0, 6 3, 0 6" fill="#4edea3"></polygon>
-      </marker>`;
-    svg.appendChild(defs);
-
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', x1);
-    line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2);
-    line.setAttribute('y2', y2);
-    line.setAttribute('stroke', '#4edea3');
-    line.setAttribute('stroke-width', '18');
-    line.setAttribute('stroke-linecap', 'round');
-    line.setAttribute('stroke-opacity', '0.9');
-    line.setAttribute('marker-end', 'url(#arrowhead)');
-    svg.appendChild(line);
-
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', x2);
-    circle.setAttribute('cy', y2);
-    circle.setAttribute('r', '34');
-    circle.setAttribute('fill', 'none');
-    circle.setAttribute('stroke', '#4edea3');
-    circle.setAttribute('stroke-width', '3');
-    circle.setAttribute('stroke-dasharray', '6,4');
-    circle.setAttribute('opacity', '0.8');
-    svg.appendChild(circle);
-  }
-
-  function renderBoard() {
-    board.position(game.fen(), false);
-    renderBoardOverlay();
-    renderArrow();
-  }
-
-  function renderPlayerStrips(pgnHeaders) {
-    const h = pgnHeaders || {};
-    document.getElementById('nameWhite').textContent = h.White || 'White';
-    document.getElementById('nameBlack').textContent = h.Black || 'Black';
-    document.getElementById('eloWhite').textContent = h.WhiteElo ? 'ELO ' + h.WhiteElo : '—';
-    document.getElementById('eloBlack').textContent = h.BlackElo ? 'ELO ' + h.BlackElo : '—';
-    document.getElementById('timerWhite').textContent = '--:--';
-    document.getElementById('timerBlack').textContent = '--:--';
-
-    document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
-    document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
-    renderCaptured();
-  }
-
-  function renderCaptured() {
-    const startCounts = {
-      w: { p: 8, n: 2, b: 2, r: 2, q: 1 },
-      b: { p: 8, n: 2, b: 2, r: 2, q: 1 }
-    };
-    const boardArr = game.board();
-    const nowCounts = {
-      w: { p: 0, n: 0, b: 0, r: 0, q: 0 },
-      b: { p: 0, n: 0, b: 0, r: 0, q: 0 }
-    };
-    for (const row of boardArr) {
-      for (const sq of row) {
-        if (!sq) continue;
-        if (sq.type === 'k') continue;
-        nowCounts[sq.color][sq.type] = (nowCounts[sq.color][sq.type] || 0) + 1;
-      }
+    /* ---------- Review screen ---------- */
+    #review-screen {
+      position: fixed;
+      inset: 0;
+      background: rgba(10,14,22,0.97);
+      backdrop-filter: blur(10px);
+      z-index: 200;
+      display: none;
+      padding: 32px 24px;
+      overflow-y: auto;
+    }
+    #review-screen.active { display: block; }
+    .review-inner {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .review-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 24px;
+      color: var(--text);
+      text-align: center;
+      margin: 0 0 6px;
+      letter-spacing: -0.5px;
+    }
+    .review-sub {
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-variant);
+      margin-bottom: 26px;
+    }
+    .review-acc-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .review-acc-card {
+      border-radius: 10px;
+      padding: 14px 16px;
+      text-align: center;
+      background: rgba(28,32,40,0.9);
+      border: 2px solid rgba(60,74,66,0.3);
+    }
+    .review-acc-card.white-win { border-color: rgba(255,255,255,0.35); }
+    .review-acc-card.black-win { border-color: rgba(78,222,163,0.5); }
+    .review-acc-name {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-variant);
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .review-acc-value {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 32px;
+      color: var(--text);
+      letter-spacing: -1px;
+      line-height: 1.1;
+    }
+    .review-acc-value.bad { color: var(--error); }
+    .review-acc-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--outline);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 2px;
     }
 
-    const capturedByBlack = [];
-    const capturedByWhite = [];
-    const glyphs = { w: { p:'♙', n:'♘', b:'♗', r:'♖', q:'♕' }, b: { p:'♟', n:'♞', b:'♝', r:'♜', q:'♛' } };
-
-    for (const type of ['q','r','b','n','p']) {
-      const missingWhite = Math.max(0, startCounts.w[type] - nowCounts.w[type]);
-      const missingBlack = Math.max(0, startCounts.b[type] - nowCounts.b[type]);
-      for (let i = 0; i < missingWhite; i++) capturedByBlack.push(glyphs.w[type]);
-      for (let i = 0; i < missingBlack; i++) capturedByWhite.push(glyphs.b[type]);
+    .review-table {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 24px;
+      background: rgba(28,32,40,0.6);
+      border: 1px solid rgba(60,74,66,0.25);
+      border-radius: 10px;
+      padding: 14px 20px;
     }
-
-    document.getElementById('capturedWhite').textContent = capturedByWhite.join('');
-    document.getElementById('capturedBlack').textContent = capturedByBlack.join('');
-
-    const valW = nowCounts.w.q * 9 + nowCounts.w.r * 5 + nowCounts.w.b * 3 + nowCounts.w.n * 3 + nowCounts.w.p;
-    const valB = nowCounts.b.q * 9 + nowCounts.b.r * 5 + nowCounts.b.b * 3 + nowCounts.b.n * 3 + nowCounts.b.p;
-    const diff = valW - valB;
-
-    const advWhite = document.getElementById('advWhite');
-    const advBlack = document.getElementById('advBlack');
-
-    if (diff > 0) {
-      advWhite.style.display = '';
-      advWhite.textContent = '+' + diff;
-      advWhite.className = 'captured-adv pos';
-      advBlack.style.display = 'none';
-    } else if (diff < 0) {
-      advBlack.style.display = '';
-      advBlack.textContent = '+' + Math.abs(diff);
-      advBlack.className = 'captured-adv pos';
-      advWhite.style.display = 'none';
-    } else {
-      advWhite.style.display = 'none';
-      advBlack.style.display = 'none';
+    .review-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(44,49,59,0.6);
+      font-family: var(--font-mono);
+      font-size: 13px;
     }
-  }
-
-  function renderStatus() {
-    const turn = game.turn() === 'w' ? 'White' : 'Black';
-    let msg = turn + ' to move';
-    if (game.isCheckmate()) msg = 'Checkmate — ' + (game.turn() === 'w' ? 'Black' : 'White') + ' wins';
-    else if (game.isDraw()) msg = 'Draw';
-    else if (game.isCheck()) msg = turn + ' is in check';
-    document.getElementById('status').textContent = msg;
-    document.getElementById('fenInline').textContent = game.fen();
-    document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
-    document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
-  }
-
-  function badgeFor(cls) {
-    if (!cls) return '';
-    return `<span class="badge cls-${cls}"></span>`;
-  }
-
-  function renderMoves() {
-    const el = document.getElementById('moveList');
-    if (history.length === 0) {
-      el.innerHTML = '<em style="color:#666; padding:12px; display:block;">No game loaded</em>';
-      document.getElementById('pgnPlies').textContent = '— plies';
-      renderHeroMove();
-      return;
+    .review-row:last-child { border-bottom: 0; }
+    .review-row .label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    document.getElementById('pgnPlies').textContent = history.length + ' plies';
-
-    let html = '';
-    for (let i = 0; i < history.length; i += 2) {
-      const num = (i / 2) + 1;
-      const white = history[i];
-      const black = history[i + 1];
-      const wIdx = i + 1;
-      const bIdx = i + 2;
-      html += `<div class="move-row">
-        <div class="move-no">${num}.</div>
-        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls)}${white.san}</div>
-        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls) + black.san : ''}</div>
-      </div>`;
+    .review-row .label .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
-    el.innerHTML = html;
-    el.querySelectorAll('.move-cell').forEach(cell => {
-      cell.onclick = () => {
-        const idx = parseInt(cell.dataset.idx, 10);
-        if (idx > 0 && idx <= history.length) gotoPly(idx);
-      };
-    });
-
-    renderHeroMove();
-  }
-
-  function renderHeroMove() {
-    const heroText = document.getElementById('heroMoveText');
-    const heroBadge = document.getElementById('heroMoveBadge');
-    const plyPill = document.getElementById('heroPlyPill');
-    const clsPill = document.getElementById('heroClsPill');
-
-    if (history.length === 0 || cursor === 0) {
-      heroText.textContent = '—';
-      heroBadge.className = 'hero-badge hero-badge-empty';
-      heroBadge.textContent = '·';
-      heroBadge.style.backgroundImage = '';
-      plyPill.textContent = `Ply 0 / ${history.length}`;
-      clsPill.textContent = 'No move';
-      return;
+    .review-row .label .name {
+      color: var(--text-variant);
+      font-weight: 500;
     }
-
-    const mv = history[cursor - 1];
-    heroText.textContent = mv.san;
-
-    heroBadge.className = 'hero-badge';
-    heroBadge.textContent = '';
-
-    if (mv.cls) {
-      heroBadge.classList.add('cls-' + mv.cls);
-      heroBadge.style.backgroundImage = `url('icons/${capitalize(mv.cls)}.png')`;
-    } else {
-      heroBadge.classList.add('hero-badge-empty');
-      heroBadge.textContent = '·';
-      heroBadge.style.backgroundImage = '';
+    .review-row .count {
+      font-weight: 700;
+      color: var(--text);
     }
+    .review-row .count.zero { color: var(--outline); font-weight: 500; }
 
-    plyPill.textContent = `Ply ${cursor} / ${history.length}`;
-    clsPill.textContent = mv.cls ? capitalize(mv.cls) : 'Unclassified';
-  }
-
-  function capitalize(s) {
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-
-  function renderNavButtons() {
-    ['first','prev'].forEach(id => document.getElementById(id).disabled = cursor === 0);
-    ['next','last'].forEach(id => document.getElementById(id).disabled = cursor >= history.length);
-    document.getElementById('heroPrev').disabled = cursor === 0;
-    document.getElementById('heroNext').disabled = cursor >= history.length;
-    document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
-  }
-
-  function renderAll() {
-    renderBoard();
-    renderStatus();
-    renderMoves();
-    renderNavButtons();
-    renderCaptured();
-    scheduleAutoAnalyze();
-  }
-
-  function gotoPly(n) {
-    n = Math.max(0, Math.min(n, history.length));
-    game = new Chess();
-    for (let i = 0; i < n; i++) {
-      try { game.move(history[i].san); } catch (e) { break; }
+    .review-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 26px;
     }
-    cursor = n;
-    renderAll();
-  }
-
-  document.getElementById('first').onclick = () => gotoPly(0);
-  document.getElementById('prev').onclick  = () => gotoPly(cursor - 1);
-  document.getElementById('next').onclick  = () => gotoPly(cursor + 1);
-  document.getElementById('last').onclick  = () => gotoPly(history.length);
-  document.getElementById('heroPrev').onclick = () => gotoPly(cursor - 1);
-  document.getElementById('heroNext').onclick = () => gotoPly(cursor + 1);
-
-  document.getElementById('tabPresentMove').onclick = () => {
-    movesViewMode = 'present';
-    document.getElementById('tabPresentMove').classList.add('active');
-    document.getElementById('tabMoveList').classList.remove('active');
-    document.getElementById('presentMoveView').style.display = '';
-    document.getElementById('moveListView').style.display = 'none';
-  };
-  document.getElementById('tabMoveList').onclick = () => {
-    movesViewMode = 'list';
-    document.getElementById('tabMoveList').classList.add('active');
-    document.getElementById('tabPresentMove').classList.remove('active');
-    document.getElementById('moveListView').style.display = '';
-    document.getElementById('presentMoveView').style.display = 'none';
-  };
-
-  document.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    if (e.key === 'ArrowLeft')  gotoPly(cursor - 1);
-    if (e.key === 'ArrowRight') gotoPly(cursor + 1);
-  });
-
-  document.getElementById('loadPgn').onclick = () => {
-    const text = document.getElementById('pgnInput').value.trim();
-    if (!text) return;
-    const g = new Chess();
-    try { g.loadPgn(text); }
-    catch (err) { alert('Could not parse PGN: ' + err.message); return; }
-
-    const headers = g.header ? g.header() : {};
-
-    const replay = new Chess();
-    const moves = g.history({ verbose: true });
-    const newHistory = [];
-    for (const m of moves) {
-      try { replay.move(m.san); } catch (e) { break; }
-      newHistory.push({
-        san: m.san, fen: replay.fen(),
-        uci: m.from + m.to + (m.promotion || ''),
-        cls: null, cpLoss: null, winDrop: null,
-        evalBefore: null, evalAfter: null,
-        moverIsWhite: null
-      });
-    }
-    history = newHistory;
-    cursor = history.length;
-    game = replay;
-    renderPlayerStrips(headers);
-    renderAll();
-  };
-
-  document.getElementById('loadFen').onclick = () => {
-    const fen = document.getElementById('fenInput').value.trim();
-    if (!fen) return;
-    try { game = new Chess(fen); }
-    catch (err) { alert('Invalid FEN'); return; }
-    history = []; cursor = 0;
-    renderPlayerStrips({});
-    renderAll();
-  };
-
-  document.getElementById('loadStart').onclick = () => {
-    game = new Chess(); history = []; cursor = 0;
-    document.getElementById('pgnInput').value = '';
-    document.getElementById('fenInput').value = '';
-    document.getElementById('analyzeAllStatus').textContent = '';
-    document.getElementById('aiOutput').innerHTML = '<em>Load a game, analyze it, then click a move and hit Explain.</em>';
-    document.getElementById('accWhite').classList.remove('show');
-    document.getElementById('accBlack').classList.remove('show');
-    document.getElementById('accWhite').textContent = '';
-    document.getElementById('accBlack').textContent = '';
-    renderPlayerStrips({});
-    renderAll();
-  };
-
-  let sf = null;
-  let sfReady = false;
-  let analyzingAll = false;
-  let autoTimer = null;
-  let engineQueue = [];
-  let engineBusy = false;
-  let lastPvUci = [];
-  let multiPvLines = [];
-
-  function initStockfish() {
-    document.getElementById('engineStatusCard').textContent = 'Loading…';
-    sf = new Worker('stockfish/stockfish-18-lite-single.js');
-
-    sf.onerror = () => {
-      document.getElementById('engineStatusCard').textContent = 'Error';
-    };
-
-    sf.onmessage = (e) => {
-      const msg = e.data;
-      if (msg === null || msg === undefined) return;
-      const text = Array.isArray(msg) ? msg.join('\n') : String(msg);
-      for (const raw of text.split('\n')) {
-        const l = raw.trim();
-        if (!l) continue;
-        if (l === 'uciok')  { sf.postMessage('isready'); continue; }
-        if (l === 'readyok') {
-          sfReady = true;
-          document.getElementById('engineStatusCard').textContent = 'Engine ready';
-          renderNavButtons();
-          scheduleAutoAnalyze();
-          continue;
-        }
-        if (engineBusy) handleEngineLine(l);
-      }
-    };
-    sf.postMessage('uci');
-  }
-
-  function handleEngineLine(l) {
-    const job = engineQueue[0];
-    if (!job) return;
-
-    if (l.startsWith('info') && l.includes(' score ')) {
-      const parts = l.split(' ');
-      const mi = parts.indexOf('multipv');
-      const pvIdx = mi !== -1 ? parseInt(parts[mi + 1], 10) : 1;
-      let score = null, mate = null;
-      const si = parts.indexOf('score');
-      if (si !== -1 && parts[si + 1] && parts[si + 2]) {
-        const type = parts[si + 1];
-        const val  = parseInt(parts[si + 2], 10);
-        if (!isNaN(val)) {
-          if (type === 'cp')   score = val;
-          if (type === 'mate') mate  = val;
-        }
-      }
-      const pi = parts.indexOf('pv');
-      let pvUci = [];
-      if (pi !== -1) {
-        pvUci = parts.slice(pi + 1).filter(x => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
-      }
-
-      const di = parts.indexOf('depth');
-      const depth = di !== -1 ? parseInt(parts[di + 1], 10) : null;
-      const ni = parts.indexOf('nps');
-      const nps = ni !== -1 ? parseInt(parts[ni + 1], 10) : null;
-
-      if (score !== null || mate !== null) {
-        job.lines[pvIdx - 1] = { score, mate, pvUci };
-        job.depth = depth;
-        job.nps = nps;
-      }
-
-      if (job.owner === 'auto' || job.owner === 'manual') {
-        multiPvLines = job.lines;
-        renderMultiPv(job.fen);
-
-        if (pvIdx === 1) {
-          const turn = job.fen.split(' ')[1];
-          let evalText = '—';
-          if (score !== null) evalText = formatScore('cp', score, turn);
-          else if (mate !== null) evalText = formatScore('mate', mate, turn);
-
-          const scoreCard = document.getElementById('evalScoreCard');
-          scoreCard.textContent = evalText;
-          const isNeg = evalText.startsWith('-') || evalText.startsWith('-M');
-          scoreCard.classList.toggle('neg', isNeg);
-
-          document.getElementById('evalDepthCard').textContent = depth !== null ? `${depth} / 60` : '—';
-          document.getElementById('evalDepthTag').textContent = 'D:' + (depth !== null ? depth : '—');
-
-          if (nps !== null) {
-            const mns = (nps / 1e6).toFixed(1);
-            document.getElementById('evalNpsCard').textContent = `${nps.toLocaleString()} nps`;
-            document.getElementById('engineNpsChip').textContent = mns;
-          } else {
-            document.getElementById('evalNpsCard').textContent = '—';
-            document.getElementById('engineNpsChip').textContent = '—';
-          }
-          document.getElementById('engineDepthChip').textContent = depth !== null ? depth : '—';
-
-          // Eval bar — White anchored at bottom, height = White's share (0..100)
-          let whiteSharePct = 50;
-          if (mate !== null && mate !== undefined) {
-            const whiteMate = turn === 'w' ? mate : -mate;
-            whiteSharePct = whiteMate > 0 ? 100 : 0;
-          } else if (score !== null) {
-            const cpWhite = turn === 'w' ? score : -score;
-            const clamped = Math.max(-2000, Math.min(2000, cpWhite));
-            whiteSharePct = 50 + (clamped / 2000) * 50;
-          }
-          document.getElementById('evalFill').style.height = whiteSharePct + '%';
-
-          if (score !== null) {
-            const s = formatScore('cp', score, turn);
-            const tag = document.getElementById('evalScoreTag');
-            tag.textContent = s;
-            tag.classList.toggle('neg', s.startsWith('-'));
-          } else if (mate !== null) {
-            const s = formatScore('mate', mate, turn);
-            const tag = document.getElementById('evalScoreTag');
-            tag.textContent = s;
-            tag.classList.toggle('neg', s.startsWith('-'));
-          }
-
-          if (pvUci.length) {
-            lastPvUci = pvUci;
-            renderArrow();
-          }
-        }
-      }
-      return;
-    }
-
-    if (l.startsWith('bestmove')) {
-      const move = l.split(' ')[1];
-      job.bestUci = move;
-      const turn = job.fen.split(' ')[1];
-      let cpWhite = null;
-      const line1 = job.lines[0];
-      if (line1) {
-        if (line1.mate !== null && line1.mate !== undefined) {
-          const sign = (line1.mate > 0 ? 1 : -1) * (turn === 'w' ? 1 : -1);
-          cpWhite = sign * (10000 - Math.abs(line1.mate) * 10);
-        } else if (line1.score !== null && line1.score !== undefined) {
-          cpWhite = turn === 'w' ? line1.score : -line1.score;
-        }
-      }
-      engineBusy = false;
-      engineQueue.shift();
-      job.resolve({
-        bestUci: move, cpWhite,
-        pvUci: line1 ? line1.pvUci : [],
-        topLines: job.lines.slice(0, 3),
-        fen: job.fen
-      });
-      pumpEngineQueue();
-      return;
-    }
-  }
-
-  function pumpEngineQueue() {
-    if (engineBusy) return;
-    if (!engineQueue.length) return;
-    const job = engineQueue[0];
-    engineBusy = true;
-    sf.postMessage('setoption name MultiPV value ' + (job.multiPv || 1));
-    sf.postMessage('position fen ' + job.fen);
-    sf.postMessage('go depth ' + job.depth);
-  }
-
-  function requestEval(fen, depth, owner = null, multiPv = 1) {
-    return new Promise((resolve) => {
-      if (!sfReady) { resolve(null); return; }
-      engineQueue.push({ fen, depth, owner, multiPv, resolve, lines: [] });
-      pumpEngineQueue();
-    });
-  }
-
-  function uciLineToSan(startFen, uciMoves) {
-    const c = new Chess();
-    try { c.load(startFen); } catch (e) { return []; }
-    const sans = [];
-    for (const uci of uciMoves) {
-      const from = uci.slice(0, 2), to = uci.slice(2, 4);
-      const promo = uci.length > 4 ? uci[4] : undefined;
-      try { const m = c.move({ from, to, promotion: promo || 'q' }); sans.push(m.san); }
-      catch (e) { break; }
-    }
-    return sans;
-  }
-
-  function formatScore(type, val, turn) {
-    if (type === 'cp') {
-      const whiteCp = turn === 'w' ? val : -val;
-      let s = (whiteCp / 100).toFixed(2);
-      if (whiteCp > 0) s = '+' + s;
-      return s;
-    }
-    const whiteMate = turn === 'w' ? val : -val;
-    if (whiteMate > 0) return 'M' + whiteMate;
-    return '-M' + Math.abs(whiteMate);
-  }
-
-  function renderMultiPv(fen) {
-    const container = document.getElementById('multiPv');
-    const turn = fen.split(' ')[1];
-    let html = '';
-    for (let i = 0; i < 3; i++) {
-      const line = multiPvLines[i];
-      if (!line) {
-        html += `<div class="pv-line empty"><span class="idx">${i+1}.</span><span class="moves">…</span><span class="score">—</span></div>`;
-        continue;
-      }
-      let scoreTxt = '—';
-      let cls = 'score';
-      if (line.mate !== null && line.mate !== undefined) {
-        scoreTxt = formatScore('mate', line.mate, turn);
-      } else if (line.score !== null && line.score !== undefined) {
-        scoreTxt = formatScore('cp', line.score, turn);
-        const whiteCp = turn === 'w' ? line.score : -line.score;
-        if (whiteCp < 0) cls += ' neg';
-      }
-      const sans = uciLineToSan(fen, line.pvUci.slice(0, 8));
-      const lineTxt = sans.join(' ') || '…';
-      html += `<div class="pv-line"><span class="idx">${i+1}.</span><span class="moves">${lineTxt}</span><span class="${cls}">${scoreTxt}</span></div>`;
-    }
-    container.innerHTML = html;
-  }
-
-  function scheduleAutoAnalyze() {
-    if (!sfReady || analyzingAll) return;
-    if (autoTimer) clearTimeout(autoTimer);
-    autoTimer = setTimeout(() => {
-      autoTimer = null;
-      document.getElementById('evalScoreCard').textContent = '…';
-      lastPvUci = [];
-      multiPvLines = [];
-      renderMultiPv(game.fen());
-      requestEval(game.fen(), 12, 'auto', 3);
-    }, 150);
-  }
-
-  function cpToWinProb(cp) { return 1 / (1 + Math.exp(-0.00368208 * cp)); }
-
-  function materialCount(fen) {
-    let w = 0, b = 0;
-    for (const ch of fen.split(' ')[0]) {
-      const lower = ch.toLowerCase();
-      if (PIECE_VALUES[lower] !== undefined && lower !== 'k') {
-        if (ch === ch.toUpperCase()) w += PIECE_VALUES[lower];
-        else                         b += PIECE_VALUES[lower];
-      }
-    }
-    return { w, b };
-  }
-
-  function isTheory(moveIndex, san) {
-    const BOOK = [
-      ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
-      ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],
-      ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],
-      ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],
-      ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],
-      ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],
-      ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],
-      ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],
-      ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],
-      ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],
-      ['c4','e5','Nc3','Nf6','Nf3','Nc6'],
-      ['Nf3','d5','g3','Nf6','Bg2','e6']
-    ];
-    for (const line of BOOK) {
-      if (moveIndex > line.length) continue;
-      let matches = true;
-      for (let i = 0; i < moveIndex - 1; i++) {
-        if (history[i] && history[i].san !== line[i]) { matches = false; break; }
-      }
-      if (matches && line[moveIndex - 1] === san) return true;
-    }
-    return false;
-  }
-
-  function isForced(index) {
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
-    let c;
-    try { c = new Chess(fenBefore); } catch (e) { return false; }
-    return c.moves().length === 1;
-  }
-
-  function isSacrifice(index) {
-    const mv = history[index - 1];
-    if (!mv) return false;
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
-    const fenAfter  = mv.fen;
-    let chessAfter, chessBefore;
-    try {
-      chessAfter  = new Chess(fenAfter);
-      chessBefore = new Chess(fenBefore);
-    } catch (e) { return false; }
-    if (chessAfter.isCheckmate()) return false;
-    if (chessAfter.isCheck())     return false;
-
-    let playedMove;
-    try {
-      const tmp = new Chess(fenBefore);
-      playedMove = tmp.move({
-        from: mv.uci.slice(0, 2),
-        to:   mv.uci.slice(2, 4),
-        promotion: mv.uci.length > 4 ? mv.uci[4] : undefined
-      });
-    } catch (e) { return false; }
-
-    const moverColor = playedMove.color;
-    const oppColor   = moverColor === 'w' ? 'b' : 'w';
-    const captured   = playedMove.captured;
-    const board = chessAfter.board();
-    const sacrificing = [];
-
-    for (const row of board) {
-      for (const sq of row) {
-        if (!sq) continue;
-        if (sq.color !== moverColor) continue;
-        if (sq.type === 'p') continue;
-        const squareName = sq.square;
-        const attackers = chessAfter.attackers(squareName, oppColor);
-        const defenders = chessAfter.attackers(squareName, moverColor);
-        const beforeAttackers = chessBefore.attackers(squareName, oppColor);
-        const beforeDefenders = chessBefore.attackers(squareName, moverColor);
-        const wasAlreadyHanging = beforeAttackers.length > 0 && beforeDefenders.length === 0;
-
-        if (playedMove.to === squareName) {
-          if (attackers.length > 0 && defenders.length === 0) {
-            const capturedVal = captured ? PIECE_VALUES[captured] : 0;
-            const pieceVal = PIECE_VALUES[sq.type];
-            if (capturedVal <= pieceVal) { sacrificing.push(squareName); continue; }
-          }
-        }
-        if (!wasAlreadyHanging && defenders.length === 0 && attackers.length > 0) {
-          const capturedVal = captured ? PIECE_VALUES[captured] : 0;
-          const pieceVal = PIECE_VALUES[sq.type];
-          if (capturedVal <= pieceVal) { sacrificing.push(squareName); continue; }
-        }
-        if (!wasAlreadyHanging && (sq.type === 'n' || sq.type === 'b') && defenders.length === 0) {
-          const pawnAttacker = attackers.some(aSq => {
-            const p = chessAfter.get(aSq); return p && p.type === 'p';
-          });
-          if (pawnAttacker) { sacrificing.push(squareName); continue; }
-        }
-        if (!wasAlreadyHanging && sq.type === 'r' && attackers.length > 0 &&
-            captured !== 'r' && captured !== 'q' &&
-            !(attackers.length === 1 &&
-              (() => { const p = chessAfter.get(attackers[0]); return p && (p.type === 'q' || p.type === 'r'); })() &&
-              defenders.length > 0) &&
-            !(defenders.length > 0 && (captured === 'n' || captured === 'b'))) {
-          sacrificing.push(squareName); continue;
-        }
-        if (!wasAlreadyHanging && sq.type === 'q' && attackers.length > 0 && captured !== 'q' &&
-            !(attackers.length === 1 &&
-              (() => { const p = chessAfter.get(attackers[0]); return p && p.type === 'q'; })() &&
-              defenders.length > 0) &&
-            !(attackers.length === 1 &&
-              (() => { const p = chessAfter.get(attackers[0]); return p && p.type === 'r'; })() &&
-              captured === 'r' && defenders.length > 0)) {
-          sacrificing.push(squareName); continue;
-        }
-      }
-    }
-
-    for (const sq of sacrificing) {
-      const afterPiece  = chessAfter.get(sq);
-      const beforePiece = chessBefore.get(sq);
-      const samePieceOnSquare = beforePiece && afterPiece &&
-        beforePiece.color === afterPiece.color && beforePiece.type === afterPiece.type;
-      const checkSquare = samePieceOnSquare ? sq : playedMove.from;
-      if (couldBeSaved(chessBefore, checkSquare, moverColor)) return true;
-    }
-    return false;
-  }
-
-  function couldBeSaved(chess, square, color) {
-    const oppColor = color === 'w' ? 'b' : 'w';
-    const attackers = chess.attackers(square, oppColor);
-    if (attackers.length === 0) {
-      const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
-      return moves.length > 0;
-    }
-    const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
-    for (const m of moves) {
-      let after;
-      try { after = new Chess(m.after); } catch (e) { continue; }
-      const stillAttacked = after.attackers(m.to, oppColor);
-      if (stillAttacked.length === 0) return true;
-    }
-    return false;
-  }
-
-  async function isBrilliant(index, fenBefore, fenAfter, preCpMover, depth) {
-    if (!isSacrifice(index)) return false;
-    const brilliantDepth = Math.max(depth, 16);
-    const post = await requestEval(fenAfter, brilliantDepth, null, 2);
-    if (!post || post.cpWhite === null) return false;
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-    const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
-    if (postCpMover < 0) return false;
-    if (post.topLines && post.topLines.length > 0) {
-      const sign = moverIsWhite ? -1 : 1;
-      for (const line of post.topLines) {
-        let cpForOpponent;
-        if (line.mate !== null && line.mate !== undefined) {
-          cpForOpponent = (line.mate > 0 ? 1 : -1) * (10000 - Math.abs(line.mate) * 10);
-        } else if (line.score !== null && line.score !== undefined) {
-          cpForOpponent = line.score;
-        } else { continue; }
-        if (sign * cpForOpponent < 0) return false;
-      }
-    }
-    return true;
-  }
-
-  async function isOnlyGoodMove(fenBefore, depth) {
-    const multi = await requestEval(fenBefore, depth, null, 2);
-    if (!multi || !multi.topLines || multi.topLines.length < 2) return false;
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-    const toMoverCp = (line) => {
-      let cpWhite;
-      if (line.mate !== null && line.mate !== undefined) {
-        const sign = (line.mate > 0 ? 1 : -1) * (moverIsWhite ? 1 : -1);
-        cpWhite = sign * (10000 - Math.abs(line.mate) * 10);
-      } else if (line.score !== null && line.score !== undefined) {
-        cpWhite = moverIsWhite ? line.score : -line.score;
-      } else { return null; }
-      return cpWhite;
-    };
-    const bestCp   = toMoverCp(multi.topLines[0]);
-    const secondCp = toMoverCp(multi.topLines[1]);
-    if (bestCp === null || secondCp === null) return false;
-    if (bestCp >= 9000) return true;
-    return (bestCp - secondCp) >= 100;
-  }
-
-  function isMiss(playedMatchesBest, preCpMover, postCpMover) {
-    if (playedMatchesBest) return false;
-    const wasWinning = preCpMover >= 200 || preCpMover >= 9000;
-    if (!wasWinning) return false;
-    const lostTheWin = postCpMover < 100 && postCpMover < preCpMover - 150;
-    return lostTheWin;
-  }
-
-  async function classifyMove(index, depth = 14) {
-    const mv = history[index - 1];
-    if (!mv) return;
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
-    const fenAfter  = mv.fen;
-    if (isForced(index)) { mv.cls = 'forced'; mv.cpLoss = 0; mv.winDrop = 0; return; }
-    if (isTheory(index, mv.san)) { mv.cls = 'theory'; mv.cpLoss = 0; mv.winDrop = 0; return; }
-
-    const pre = await requestEval(fenBefore, depth, null, 1);
-    if (!pre || pre.cpWhite === null) return;
-    const playedMatchesBest = pre.bestUci && pre.bestUci !== '(none)' &&
-      mv.uci.startsWith(pre.bestUci.slice(0, 4)) &&
-      (mv.uci.length === 4 || mv.uci[4] === pre.bestUci[4]);
-    const post = await requestEval(fenAfter, depth, null, 1);
-    if (!post || post.cpWhite === null) return;
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-    const preCpMover  = moverIsWhite ?  pre.cpWhite : -pre.cpWhite;
-    const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
-    mv.evalBefore = preCpMover;
-    mv.evalAfter  = postCpMover;
-    mv.moverIsWhite = moverIsWhite;
-    const clamp = v => Math.max(-1000, Math.min(1000, v));
-    const preWin  = cpToWinProb(clamp(preCpMover));
-    const postWin = cpToWinProb(clamp(postCpMover));
-    const winDrop = Math.max(0, preWin - postWin);
-    mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
-    mv.winDrop = winDrop;
-
-    const brilliant = await isBrilliant(index, fenBefore, fenAfter, preCpMover, depth);
-    if (brilliant) { mv.cls = 'brilliant'; return; }
-
-    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) { mv.cls = 'miss'; return; }
-
-    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
-    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
-    if (bothWinning || bothLosing) { mv.cls = winDrop <= 0.005 ? 'best' : 'good'; return; }
-
-    if (playedMatchesBest) {
-      const great = await isOnlyGoodMove(fenBefore, depth);
-      mv.cls = great ? 'great' : 'best';
-      return;
-    }
-    mv.cls = classifyWinDrop(winDrop);
-  }
-
-  function classifyWinDrop(winDrop) {
-    const pp = winDrop * 100;
-    if (pp <= 0.5)  return 'best';
-    if (pp <= 1.5)  return 'excellent';
-    if (pp <= 3.5)  return 'good';
-    if (pp <= 7)    return 'inaccuracy';
-    if (pp <= 14)   return 'mistake';
-    return 'blunder';
-  }
-
-  // ---------- Accuracy ----------
-  // Lichess-style conversion of average centipawn loss to a 0-100% score.
-  function cpLossToAccuracy(avgCpLoss) {
-    const a = 103.1668 * Math.exp(-0.04354 * avgCpLoss / 10) - 3.1669;
-    return Math.max(0, Math.min(100, a));
-  }
-
-  function computeAccuracy() {
-    let wTotal = 0, wCount = 0;
-    let bTotal = 0, bCount = 0;
-
-    for (const mv of history) {
-      if (mv.cpLoss === null || mv.cpLoss === undefined) continue;
-      if (mv.moverIsWhite === null || mv.moverIsWhite === undefined) continue;
-      if (mv.moverIsWhite) { wTotal += mv.cpLoss; wCount++; }
-      else                 { bTotal += mv.cpLoss; bCount++; }
-    }
-
-    const wAvg = wCount ? wTotal / wCount : 0;
-    const bAvg = bCount ? bTotal / bCount : 0;
-
-    return {
-      white: wCount ? cpLossToAccuracy(wAvg) : null,
-      black: bCount ? cpLossToAccuracy(bAvg) : null,
-      whiteMoves: wCount,
-      blackMoves: bCount
-    };
-  }
-
-  function updateAccuracyDisplay() {
-    const acc = computeAccuracy();
-    const wEl = document.getElementById('accWhite');
-    const bEl = document.getElementById('accBlack');
-
-    if (acc.white !== null) {
-      wEl.textContent = acc.white.toFixed(1) + '% acc';
-      wEl.classList.add('show');
-    }
-    if (acc.black !== null) {
-      bEl.textContent = acc.black.toFixed(1) + '% acc';
-      bEl.classList.add('show');
-    }
-  }
-
-  document.getElementById('analyzeAllBtn').onclick = async () => {
-    if (analyzingAll || !sfReady || history.length === 0) return;
-    analyzingAll = true;
-    document.getElementById('analyzeAllBtn').disabled = true;
-    const depth = 14;
-    for (let i = 1; i <= history.length; i++) {
-      document.getElementById('analyzeAllStatus').textContent = `Analyzing move ${i} / ${history.length}…`;
-      await classifyMove(i, depth);
-      renderMoves();
-      renderBoardOverlay();
-      renderNavButtons();
-      await new Promise(r => setTimeout(r, 0));
-    }
-    analyzingAll = false;
-    document.getElementById('analyzeAllBtn').disabled = false;
-    document.getElementById('analyzeAllStatus').textContent = 'Done.';
-    renderMoves();
-    renderBoardOverlay();
-    updateAccuracyDisplay();
-  };
-
-  document.getElementById('aiExplainBtn').onclick = async () => {
-    const model  = document.getElementById('aiModel').value;
-    const output = document.getElementById('aiOutput');
-    if (cursor === 0) {
-      output.innerHTML = '<em>Load a game first.</em>';
-      return;
-    }
-    const mv = history[cursor - 1];
-    const fenBefore = cursor === 1 ? START_FEN : history[cursor - 2].fen;
-    const fenAfter  = mv.fen;
-    output.innerHTML = '<em>Thinking…</em>';
-
-    const prompt = `You are a chess coach. Explain this move in 2-3 short sentences.
-
-Move played: ${mv.san} (${mv.uci})
-Classification: ${mv.cls || 'unclassified'}
-Position before (FEN): ${fenBefore}
-Position after (FEN): ${fenAfter}
-Eval before (mover POV, centipawns): ${mv.evalBefore ?? 'unknown'}
-Eval after (mover POV, centipawns): ${mv.evalAfter ?? 'unknown'}
-
-Explain in plain English why this move was classified as ${mv.cls || 'unclassified'}. If it's Brilliant, explain what the sacrifice accomplishes. If it's a Miss, explain what winning opportunity was overlooked. If it's a mistake or blunder, explain what was given up. Keep it under 3 sentences. No markdown.`;
-
-    try {
-      const res = await fetch(PROXY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 800,
-          temperature: 0.7,
-          enable_thinking: false
-        })
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        output.innerHTML = `<em style="color:#e88f8f;">API error ${res.status}: ${errText.slice(0, 200)}</em>`;
-        return;
-      }
-      const data = await res.json();
-      const msg = data?.choices?.[0]?.message;
-      let text = msg?.content?.trim();
-      if (!text) text = msg?.reasoning_content?.trim();
-      if (!text) {
-        output.innerHTML = '<em style="color:#e88f8f;">Empty response from API.</em>';
-        return;
-      }
-      output.textContent = text;
-    } catch (err) {
-      output.innerHTML = `<em style="color:#e88f8f;">Fetch failed: ${err.message}</em>`;
-    }
-  };
-
-  window.addEventListener('resize', () => { renderBoardOverlay(); renderArrow(); });
-
-  renderPlayerStrips({});
-  renderAll();
-  initStockfish();
-
-  window.getGame = () => game;
-  window.getHistory = () => history;
-  window.isSacrifice = isSacrifice;
-  window.couldBeSaved = couldBeSaved;
-  window.classifyMove = classifyMove;
-  window.isBrilliant = isBrilliant;
-  window.isMiss = isMiss;
-  window.materialCount = materialCount;
-  window.computeAccuracy = computeAccuracy;
-
-});
-</script>
-
-</body>
-</html>
+    .review-buttons .btn {
+      padding: 10px 22
