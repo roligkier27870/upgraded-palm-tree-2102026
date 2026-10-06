@@ -612,6 +612,11 @@
       background-position: center;
       flex-shrink: 0;
     }
+    .move-cell .badge.pending {
+      background: var(--surface-highest);
+      border-radius: 50%;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
 
     .present-move {
       display: flex;
@@ -653,6 +658,7 @@
     }
     .hero-badge:hover { transform: scale(1.05); }
     .hero-badge-empty { background: var(--surface-highest); color: var(--outline); font-size: 20px; }
+    .hero-badge.pending { animation: pulse 1.2s ease-in-out infinite; }
 
     .hero-badge.cls-brilliant  { background-color: #26c2a3; }
     .hero-badge.cls-great      { background-color: #749bbf; }
@@ -954,7 +960,7 @@
 
     /* ---------- Eval graph ---------- */
     #eval-graph-card {
-      display: none;  /* hidden until analysis runs */
+      display: none;
     }
     #eval-graph-card.show { display: block; }
 
@@ -973,12 +979,6 @@
       display: block;
       cursor: pointer;
     }
-    #eval-graph-svg .bg-black {
-      fill: #0a0e16;
-    }
-    #eval-graph-svg .bg-white {
-      fill: #f5f6f8;
-    }
     #eval-graph-svg .midline {
       stroke: rgba(78,222,163,0.25);
       stroke-width: 1;
@@ -996,10 +996,6 @@
       stroke: var(--primary);
       stroke-width: 2;
       stroke-opacity: 0.9;
-    }
-    #eval-graph-svg .cursor-halo {
-      fill: var(--primary);
-      opacity: 0.35;
     }
 
     @media (max-width: 1100px) {
@@ -1295,21 +1291,163 @@ window.addEventListener('chessjs-ready', () => {
 
   let previousFen = game.fen();
 
-  function onDrop(source, target) {
+  // ------------------------------------------------------------
+  // Live-move classification
+  // ------------------------------------------------------------
+  // When the user drags a move that isn't already in history, we push it
+  // and classify it immediately. Classification uses the previous move's
+  // evalAfter as the pre-position eval (no extra engine call for "before"),
+  // then one engine call for the post-position, plus the Brilliant / Miss
+  // checks if needed.
+  async function onDrop(source, target) {
     try {
       const move = game.move({ from: source, to: target, promotion: 'q' });
+
+      // Truncate any future, then push the new move
       history = history.slice(0, cursor);
+      const index = history.length + 1;   // 1-based
+
       history.push({
         san: move.san, fen: game.fen(),
         uci: move.from + move.to + (move.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
         evalBefore: null, evalAfter: null,
-        moverIsWhite: null
+        evalBeforeWhite: null, evalAfterWhite: null,
+        moverIsWhite: null,
+        pending: true
       });
       cursor = history.length;
+
+      // Render immediately so the user sees the move and a "pending" badge
       renderAll();
-    } catch (e) { return 'snapback'; }
+
+      // Classify in the background
+      classifySingleMove(index);
+    } catch (e) {
+      return 'snapback';
+    }
   }
+
+  // Classify one move. Reuses the previous move's evalAfterWhite (White POV)
+  // as the pre-position eval to save an engine call.
+  async function classifySingleMove(index) {
+    if (!sfReady || index < 1 || index > history.length) return;
+    const mv = history[index - 1];
+    if (!mv) return;
+
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenAfter = mv.fen;
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    mv.moverIsWhite = moverIsWhite;
+
+    // Reuse previous evalAfterWhite when available; otherwise eval fresh.
+    let preCpWhite;
+    if (index === 1) {
+      // Start position: eval it once, cheap
+      const preEval = await requestEval(fenBefore, 12, null, 1);
+      preCpWhite = preEval ? preEval.cpWhite : 0;
+    } else {
+      const prev = history[index - 2];
+      if (prev.evalAfterWhite !== null && prev.evalAfterWhite !== undefined) {
+        preCpWhite = prev.evalAfterWhite;
+      } else {
+        const preEval = await requestEval(fenBefore, 12, null, 1);
+        preCpWhite = preEval ? preEval.cpWhite : 0;
+      }
+    }
+
+    // One engine call for the position after the played move.
+    const post = await requestEval(fenAfter, 14, null, 1);
+    if (!post || post.cpWhite === null) {
+      mv.pending = false;
+      renderAll();
+      return;
+    }
+
+    const postCpWhite = post.cpWhite;
+    const preCpMover  = moverIsWhite ?  preCpWhite : -preCpWhite;
+    const postCpMover = moverIsWhite ? postCpWhite : -postCpWhite;
+
+    mv.evalBefore = preCpMover;
+    mv.evalAfter  = postCpMover;
+    mv.evalBeforeWhite = preCpWhite;
+    mv.evalAfterWhite  = postCpWhite;
+
+    const clamp = v => Math.max(-1000, Math.min(1000, v));
+    const preWin  = cpToWinProb(clamp(preCpMover));
+    const postWin = cpToWinProb(clamp(postCpMover));
+    const winDrop = Math.max(0, preWin - postWin);
+    mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
+    mv.winDrop = winDrop;
+
+    // Best-move comparison
+    const playedMatchesBest = post.bestUci && post.bestUci !== '(none)' &&
+      mv.uci.startsWith(post.bestUci.slice(0, 4)) &&
+      (mv.uci.length === 4 || mv.uci[4] === post.bestUci[4]);
+
+    // Forced?
+    if (isForced(index)) { mv.cls = 'forced'; mv.pending = false; renderAll(); return; }
+
+    // Theory?
+    if (isTheory(index, mv.san)) { mv.cls = 'theory'; mv.pending = false; renderAll(); return; }
+
+    // Brilliant?
+    const brilliant = await isBrilliantLive(index, fenBefore, fenAfter, preCpMover);
+    if (brilliant) { mv.cls = 'brilliant'; mv.pending = false; renderAll(); return; }
+
+    // Miss?
+    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) { mv.cls = 'miss'; mv.pending = false; renderAll(); return; }
+
+    // Dead-won / dead-lost
+    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
+    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
+    if (bothWinning || bothLosing) {
+      mv.cls = winDrop <= 0.005 ? 'best' : 'good';
+      mv.pending = false;
+      renderAll();
+      return;
+    }
+
+    // Best/Great
+    if (playedMatchesBest) {
+      const great = await isOnlyGoodMove(fenBefore, 14);
+      mv.cls = great ? 'great' : 'best';
+      mv.pending = false;
+      renderAll();
+      return;
+    }
+
+    mv.cls = classifyWinDrop(winDrop);
+    mv.pending = false;
+    renderAll();
+  }
+
+  // Brilliant check for live classification — same as the full-game version
+  // but takes a precomputed preCpMover and only runs the after-sac MultiPV-2
+  // call when a sac is detected.
+  async function isBrilliantLive(index, fenBefore, fenAfter, preCpMover) {
+    if (!isSacrifice(index)) return false;
+    const post = await requestEval(fenAfter, 16, null, 2);
+    if (!post || post.cpWhite === null) return false;
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
+    if (postCpMover < 0) return false;
+    if (post.topLines && post.topLines.length > 0) {
+      const sign = moverIsWhite ? -1 : 1;
+      for (const line of post.topLines) {
+        let cpForOpponent;
+        if (line.mate !== null && line.mate !== undefined) {
+          cpForOpponent = (line.mate > 0 ? 1 : -1) * (10000 - Math.abs(line.mate) * 10);
+        } else if (line.score !== null && line.score !== undefined) {
+          cpForOpponent = line.score;
+        } else { continue; }
+        if (sign * cpForOpponent < 0) return false;
+      }
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------
 
   function renderBoardOverlay() {
     const overlay = document.getElementById('board-overlay');
@@ -1317,7 +1455,7 @@ window.addEventListener('chessjs-ready', () => {
     overlay.innerHTML = '';
     if (cursor === 0) return;
     const mv = history[cursor - 1];
-    if (!mv || !mv.cls) return;
+    if (!mv) return;
 
     const dest = mv.uci.slice(2, 4);
     const fileIdx = dest.charCodeAt(0) - 'a'.charCodeAt(0);
@@ -1328,11 +1466,18 @@ window.addEventListener('chessjs-ready', () => {
     const badgeSize = 26;
 
     const badge = document.createElement('div');
-    badge.className = 'sq-badge cls-' + mv.cls;
+    badge.className = 'sq-badge' + (mv.cls ? ' cls-' + mv.cls : '');
+    if (!mv.cls && mv.pending) {
+      badge.className = 'sq-badge';
+      badge.style.background = 'var(--surface-highest)';
+      badge.style.borderRadius = '50%';
+      badge.style.width = '20px';
+      badge.style.height = '20px';
+    }
     badge.style.left = (fileIdx * sq + sq - badgeSize) + 'px';
     badge.style.top  = (rankIdx * sq) + 'px';
-    badge.title = mv.cls;
-    overlay.appendChild(badge);
+    badge.title = mv.cls || (mv.pending ? 'Analyzing…' : '');
+    if (mv.cls || mv.pending) overlay.appendChild(badge);
   }
 
   function renderArrow() {
@@ -1353,6 +1498,7 @@ window.addEventListener('chessjs-ready', () => {
     const cx = (f) => f * sq + sq / 2;
     const cy = (r) => (7 - r) * sq + sq / 2;
 
+    // Shorten the arrow slightly so it doesn't touch the piece.
     const x1 = cx(fromFile);
     const y1 = cy(fromRank);
     const x2 = cx(toFile);
@@ -1360,8 +1506,8 @@ window.addEventListener('chessjs-ready', () => {
 
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
-      <marker id="arrowhead" markerWidth="6" markerHeight="6" orient="auto" refX="3.2" refY="3">
-        <polygon points="0 0, 6 3, 0 6" fill="#4edea3"></polygon>
+      <marker id="arrowhead" markerWidth="4" markerHeight="4" orient="auto" refX="2.4" refY="2">
+        <polygon points="0 0, 4 2, 0 4" fill="#4edea3"></polygon>
       </marker>`;
     svg.appendChild(defs);
 
@@ -1371,21 +1517,21 @@ window.addEventListener('chessjs-ready', () => {
     line.setAttribute('x2', x2);
     line.setAttribute('y2', y2);
     line.setAttribute('stroke', '#4edea3');
-    line.setAttribute('stroke-width', '18');
+    line.setAttribute('stroke-width', '10');
     line.setAttribute('stroke-linecap', 'round');
-    line.setAttribute('stroke-opacity', '0.9');
+    line.setAttribute('stroke-opacity', '0.85');
     line.setAttribute('marker-end', 'url(#arrowhead)');
     svg.appendChild(line);
 
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', x2);
     circle.setAttribute('cy', y2);
-    circle.setAttribute('r', '34');
+    circle.setAttribute('r', '20');
     circle.setAttribute('fill', 'none');
     circle.setAttribute('stroke', '#4edea3');
-    circle.setAttribute('stroke-width', '3');
-    circle.setAttribute('stroke-dasharray', '6,4');
-    circle.setAttribute('opacity', '0.8');
+    circle.setAttribute('stroke-width', '2');
+    circle.setAttribute('stroke-dasharray', '5,4');
+    circle.setAttribute('opacity', '0.75');
     svg.appendChild(circle);
   }
 
@@ -1659,9 +1805,10 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
-  function badgeFor(cls) {
-    if (!cls) return '';
-    return `<span class="badge cls-${cls}"></span>`;
+  function badgeFor(cls, pending) {
+    if (cls) return `<span class="badge cls-${cls}"></span>`;
+    if (pending) return `<span class="badge pending"></span>`;
+    return '';
   }
 
   function renderMoves() {
@@ -1683,8 +1830,8 @@ window.addEventListener('chessjs-ready', () => {
       const bIdx = i + 2;
       html += `<div class="move-row">
         <div class="move-no">${num}.</div>
-        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls)}${white.san}</div>
-        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls) + black.san : ''}</div>
+        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls, white.pending)}${white.san}</div>
+        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls, black.pending) + black.san : ''}</div>
       </div>`;
     }
     el.innerHTML = html;
@@ -1723,6 +1870,10 @@ window.addEventListener('chessjs-ready', () => {
     if (mv.cls) {
       heroBadge.classList.add('cls-' + mv.cls);
       heroBadge.style.backgroundImage = `url('icons/${capitalize(mv.cls)}.png')`;
+    } else if (mv.pending) {
+      heroBadge.classList.add('pending');
+      heroBadge.textContent = '…';
+      heroBadge.style.backgroundImage = '';
     } else {
       heroBadge.classList.add('hero-badge-empty');
       heroBadge.textContent = '·';
@@ -1730,7 +1881,7 @@ window.addEventListener('chessjs-ready', () => {
     }
 
     plyPill.textContent = `Ply ${cursor} / ${history.length}`;
-    clsPill.textContent = mv.cls ? capitalize(mv.cls) : 'Unclassified';
+    clsPill.textContent = mv.cls ? capitalize(mv.cls) : (mv.pending ? 'Analyzing…' : 'Unclassified');
   }
 
   function capitalize(s) {
@@ -1745,19 +1896,11 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
   }
 
-  // ============================================================
-  // Eval graph
-  // ============================================================
-  // Renders a lichess-style "mountain" chart: white area fills above the
-  // midline where White is winning, black area fills below where Black is
-  // winning. Markers show blunders/mistakes/brilliants. A vertical line
-  // shows the current cursor position.
   function renderEvalGraph() {
     const card = document.getElementById('eval-graph-card');
     const svg = document.getElementById('eval-graph-svg');
     if (!card || !svg) return;
 
-    // Only show once the game has been analyzed
     const hasData = history.length > 0 &&
       history.some(m => m.evalAfterWhite !== null && m.evalAfterWhite !== undefined);
     if (!hasData) {
@@ -1772,7 +1915,6 @@ window.addEventListener('chessjs-ready', () => {
     const H = 120;
     const MID = H / 2;
 
-    // One point per ply using White-POV evals (no sign flipping).
     const points = [{ ply: 0, cp: 0 }];
     for (let i = 0; i < history.length; i++) {
       const mv = history[i];
@@ -1797,7 +1939,7 @@ window.addEventListener('chessjs-ready', () => {
 
     const boundary = points.map(p => ({ x: plyToX(p.ply), y: cpToY(p.cp) }));
 
-    // ---- WHITE region: fills from the bottom edge up to the curve ----
+    // WHITE region: fill from bottom edge up to curve
     const whitePts = [];
     whitePts.push(`${W},${H}`);
     whitePts.push(`0,${H}`);
@@ -1809,7 +1951,7 @@ window.addEventListener('chessjs-ready', () => {
     whitePoly.setAttribute('fill', '#f5f6f8');
     svg.appendChild(whitePoly);
 
-    // ---- BLACK region: fills from the top edge down to the curve ----
+    // BLACK region: fill from top edge down to curve
     const blackPts = [];
     blackPts.push(`0,0`);
     blackPts.push(`${W},0`);
@@ -1821,7 +1963,7 @@ window.addEventListener('chessjs-ready', () => {
     blackPoly.setAttribute('fill', '#0a0e16');
     svg.appendChild(blackPoly);
 
-    // ---- Midline ----
+    // Midline
     const mid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     mid.setAttribute('class', 'midline');
     mid.setAttribute('x1', 0);
@@ -1830,7 +1972,7 @@ window.addEventListener('chessjs-ready', () => {
     mid.setAttribute('y2', MID);
     svg.appendChild(mid);
 
-    // ---- Thin green stroke along the curve ----
+    // Thin green stroke along the curve
     const pathD = 'M ' + boundary.map(p => `${p.x} ${p.y}`).join(' L ');
     const curve = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     curve.setAttribute('d', pathD);
@@ -1839,7 +1981,7 @@ window.addEventListener('chessjs-ready', () => {
     curve.setAttribute('stroke-width', '1');
     svg.appendChild(curve);
 
-    // ---- Markers for notable moves ----
+    // Markers
     const markerClasses = {
       brilliant: 'marker-brilliant',
       blunder: 'marker-blunder',
@@ -1862,7 +2004,7 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(dot);
     }
 
-    // ---- Cursor line at current ply ----
+    // Cursor line
     if (cursor > 0 && cursor <= history.length) {
       const x = plyToX(cursor);
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -1874,7 +2016,7 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(line);
     }
 
-    // ---- Click handler ----
+    // Click to jump
     svg.onclick = (evt) => {
       const rect = svg.getBoundingClientRect();
       const relX = evt.clientX - rect.left;
@@ -1952,7 +2094,9 @@ window.addEventListener('chessjs-ready', () => {
         uci: m.from + m.to + (m.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
         evalBefore: null, evalAfter: null,
-        moverIsWhite: null
+        evalBeforeWhite: null, evalAfterWhite: null,
+        moverIsWhite: null,
+        pending: false
       });
     }
     history = newHistory;
@@ -2606,6 +2750,7 @@ window.addEventListener('chessjs-ready', () => {
       document.getElementById('analysisSub').textContent = `${i} / ${history.length}`;
       document.getElementById('analysisProgressBar').style.width = ((i / history.length) * 100) + '%';
       await classifyMove(i, depth);
+      mv.pending = false;
       await new Promise(r => setTimeout(r, 0));
     }
 
