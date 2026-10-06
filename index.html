@@ -1759,7 +1759,7 @@ window.addEventListener('chessjs-ready', () => {
 
     // Only show once the game has been analyzed
     const hasData = history.length > 0 &&
-      history.some(m => m.evalBefore !== null && m.evalBefore !== undefined);
+      history.some(m => m.evalAfterWhite !== null && m.evalAfterWhite !== undefined);
     if (!hasData) {
       card.classList.remove('show');
       return;
@@ -1772,25 +1772,20 @@ window.addEventListener('chessjs-ready', () => {
     const H = 120;
     const MID = H / 2;
 
-    // Build the series of eval values at each ply boundary:
-    // evalBefore of move 1, evalAfter of move 1, evalBefore of move 2, ...
-    // Simpler: use evalAfter of every move, plus START value of 0 at ply 0.
+    // One point per ply using White-POV evals (no sign flipping).
     const points = [{ ply: 0, cp: 0 }];
     for (let i = 0; i < history.length; i++) {
       const mv = history[i];
-      let cp = mv.evalAfter;
+      let cp = mv.evalAfterWhite;
       if (cp === null || cp === undefined) {
-        // If missing, fall back to evalBefore or last known
-        cp = (mv.evalBefore !== null && mv.evalBefore !== undefined)
-          ? mv.evalBefore
+        cp = (mv.evalBeforeWhite !== null && mv.evalBeforeWhite !== undefined)
+          ? mv.evalBeforeWhite
           : (points[points.length - 1] ? points[points.length - 1].cp : 0);
       }
-      // Convert mate scores — clamp to ±2000 for the graph
       cp = Math.max(-2000, Math.min(2000, cp));
       points.push({ ply: i + 1, cp });
     }
 
-    // Clamp mapping: cp ±2000 maps to y 0..H with MID at 0.00
     const cpToY = (cp) => {
       const norm = Math.max(-1, Math.min(1, cp / 2000));
       return MID - norm * (MID - 4);
@@ -1800,24 +1795,33 @@ window.addEventListener('chessjs-ready', () => {
       return (ply / (points.length - 1)) * W;
     };
 
-    // ---- Background: black top + white bottom (default state) ----
-    const bgBlack = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgBlack.setAttribute('class', 'bg-black');
-    bgBlack.setAttribute('x', 0);
-    bgBlack.setAttribute('y', 0);
-    bgBlack.setAttribute('width', W);
-    bgBlack.setAttribute('height', H);
-    svg.appendChild(bgBlack);
+    const boundary = points.map(p => ({ x: plyToX(p.ply), y: cpToY(p.cp) }));
 
-    const bgWhite = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgWhite.setAttribute('class', 'bg-white');
-    bgWhite.setAttribute('x', 0);
-    bgWhite.setAttribute('y', MID);
-    bgWhite.setAttribute('width', W);
-    bgWhite.setAttribute('height', MID);
-    svg.appendChild(bgWhite);
+    // ---- WHITE region: fills from the bottom edge up to the curve ----
+    const whitePts = [];
+    whitePts.push(`${W},${H}`);
+    whitePts.push(`0,${H}`);
+    for (const pt of boundary) {
+      whitePts.push(`${pt.x},${pt.y}`);
+    }
+    const whitePoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    whitePoly.setAttribute('points', whitePts.join(' '));
+    whitePoly.setAttribute('fill', '#f5f6f8');
+    svg.appendChild(whitePoly);
 
-    // ---- Midline (0.00) ----
+    // ---- BLACK region: fills from the top edge down to the curve ----
+    const blackPts = [];
+    blackPts.push(`0,0`);
+    blackPts.push(`${W},0`);
+    for (let i = boundary.length - 1; i >= 0; i--) {
+      blackPts.push(`${boundary[i].x},${boundary[i].y}`);
+    }
+    const blackPoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    blackPoly.setAttribute('points', blackPts.join(' '));
+    blackPoly.setAttribute('fill', '#0a0e16');
+    svg.appendChild(blackPoly);
+
+    // ---- Midline ----
     const mid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     mid.setAttribute('class', 'midline');
     mid.setAttribute('x1', 0);
@@ -1826,102 +1830,14 @@ window.addEventListener('chessjs-ready', () => {
     mid.setAttribute('y2', MID);
     svg.appendChild(mid);
 
-    // ---- White area path (from midline to eval, when eval > 0) ----
-    // Simpler approach: draw a filled polygon for the eval curve,
-    // colored white above the midline, black below.
-    // We do this by drawing two paths:
-    //   1. "White advantage" polygon: fills between midline and curve
-    //      when the curve is above the midline.
-    //   2. "Black advantage" polygon: fills between midline and curve
-    //      when the curve is below the midline.
-    // Both can be represented as two overlaid polygons.
-
-    // Build polygon for the "filled from midline" shape. This is a
-    // single filled region that alternates sides. To color it correctly
-    // we use an SVG clipPath approach — but simpler: just draw a thick
-    // stroke along the curve using two colors is complex.
-    //
-    // Easiest correct approach: draw the region as a stack of small
-    // rectangles, one per line segment, colored by the sign of the eval.
-    // Overkill for 60 plies.
-
-    // Simpler visual: draw the eval path as a filled polygon from the
-    // midline up to the curve when the curve is above, and down when
-    // below. Use two paths split at sign changes.
-
-    // Compute sign-segmented polygons.
-    const whitePolyPts = [];
-    const blackPolyPts = [];
-
-    // Prepend midpoint of first point to close polygons
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      const x = plyToX(p.ply);
-      const y = cpToY(p.cp);
-      const above = p.cp >= 0;
-
-      if (above) {
-        whitePolyPts.push({ x, y, midY: MID, side: 'above' });
-      } else {
-        blackPolyPts.push({ x, y, midY: MID, side: 'below' });
-      }
-    }
-
-    // White polygon: for each contiguous "above" run, draw a polygon
-    // from midline -> curve -> back to midline.
-    function drawSegmentedPolygon(pts, above) {
-      if (!pts.length) return;
-      // Group contiguous runs, adding transition points where the curve
-      // crosses the midline.
-      const runs = [];
-      let current = [];
-      let lastX = null;
-
-      // Fill in gaps: we need continuous pts. Rebuild from the original
-      // series to keep mid-line intersections.
-      for (let i = 0; i < points.length; i++) {
-        const p = points[i];
-        const x = plyToX(p.ply);
-        const y = cpToY(p.cp);
-        const isAbove = p.cp >= 0;
-        if (isAbove === above) {
-          if (!current.length && lastX !== null && lastX.x !== null) {
-            // Insert crossing point at midline
-            current.push({ x: lastX.x, y: MID });
-          }
-          current.push({ x, y });
-        } else {
-          if (current.length) {
-            // Close the run with a midline point at current x
-            current.push({ x, y: MID });
-            runs.push(current);
-            current = [];
-          }
-        }
-        lastX = { x };
-      }
-      if (current.length) {
-        // Extend last run to the right edge if it ends above
-        const last = points[points.length - 1];
-        current.push({ x: plyToX(last.ply), y: MID });
-        runs.push(current);
-      }
-
-      for (const run of runs) {
-        if (run.length < 2) continue;
-        const polyPts = [];
-        polyPts.push(`${run[0].x},${MID}`);
-        for (const pt of run) polyPts.push(`${pt.x},${pt.y}`);
-        polyPts.push(`${run[run.length - 1].x},${MID}`);
-        const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        poly.setAttribute('points', polyPts.join(' '));
-        poly.setAttribute('fill', above ? '#ffffff' : '#0a0e16');
-        svg.appendChild(poly);
-      }
-    }
-
-    drawSegmentedPolygon(points, true);
-    drawSegmentedPolygon(points, false);
+    // ---- Thin green stroke along the curve ----
+    const pathD = 'M ' + boundary.map(p => `${p.x} ${p.y}`).join(' L ');
+    const curve = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    curve.setAttribute('d', pathD);
+    curve.setAttribute('fill', 'none');
+    curve.setAttribute('stroke', 'rgba(78,222,163,0.45)');
+    curve.setAttribute('stroke-width', '1');
+    svg.appendChild(curve);
 
     // ---- Markers for notable moves ----
     const markerClasses = {
@@ -1958,7 +1874,7 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(line);
     }
 
-    // ---- Click handler: jump to ply at click x ----
+    // ---- Click handler ----
     svg.onclick = (evt) => {
       const rect = svg.getBoundingClientRect();
       const relX = evt.clientX - rect.left;
@@ -2544,6 +2460,8 @@ window.addEventListener('chessjs-ready', () => {
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
     mv.evalBefore = preCpMover;
     mv.evalAfter  = postCpMover;
+    mv.evalBeforeWhite = pre.cpWhite;
+    mv.evalAfterWhite  = post.cpWhite;
     const clamp = v => Math.max(-1000, Math.min(1000, v));
     const preWin  = cpToWinProb(clamp(preCpMover));
     const postWin = cpToWinProb(clamp(postCpMover));
