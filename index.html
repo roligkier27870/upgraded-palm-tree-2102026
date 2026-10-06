@@ -952,6 +952,56 @@
     .dot-blunder    { background: var(--cls-blunder); }
     .dot-forced     { background: var(--cls-forced); }
 
+    /* ---------- Eval graph ---------- */
+    #eval-graph-card {
+      display: none;  /* hidden until analysis runs */
+    }
+    #eval-graph-card.show { display: block; }
+
+    #eval-graph-wrap {
+      position: relative;
+      width: 100%;
+      height: 120px;
+      background: var(--surface-lowest);
+      border: 1px solid rgba(60,74,66,0.3);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #eval-graph-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: pointer;
+    }
+    #eval-graph-svg .bg-black {
+      fill: #0a0e16;
+    }
+    #eval-graph-svg .bg-white {
+      fill: #f5f6f8;
+    }
+    #eval-graph-svg .midline {
+      stroke: rgba(78,222,163,0.25);
+      stroke-width: 1;
+      stroke-dasharray: 3,3;
+    }
+    #eval-graph-svg .marker {
+      stroke: var(--surface-lowest);
+      stroke-width: 1.5;
+    }
+    #eval-graph-svg .marker-brilliant  { fill: var(--cls-brilliant); }
+    #eval-graph-svg .marker-blunder    { fill: var(--cls-blunder); }
+    #eval-graph-svg .marker-mistake    { fill: var(--cls-mistake); }
+    #eval-graph-svg .marker-miss       { fill: var(--cls-miss); }
+    #eval-graph-svg .cursor-line {
+      stroke: var(--primary);
+      stroke-width: 2;
+      stroke-opacity: 0.9;
+    }
+    #eval-graph-svg .cursor-halo {
+      fill: var(--primary);
+      opacity: 0.35;
+    }
+
     @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { border-left: 0; border-top: 1px solid var(--line); padding: 20px; }
@@ -1144,6 +1194,16 @@
       <div id="analyzeAllStatus" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px;"></div>
     </div>
 
+    <div class="card" id="eval-graph-card">
+      <div class="card-header">
+        <span class="card-title">Evaluation graph</span>
+        <span class="card-meta">Click to jump</span>
+      </div>
+      <div id="eval-graph-wrap">
+        <svg id="eval-graph-svg" viewBox="0 0 400 120" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header">
         <span class="card-title">AI Explanation</span>
@@ -1329,10 +1389,6 @@ window.addEventListener('chessjs-ready', () => {
     svg.appendChild(circle);
   }
 
-  // ---------- Board animation helpers ----------
-
-  // chessboard.js renders each square as a <div data-square="e4"> containing
-  // an <img> for the piece. Look up the piece image inside that square.
   function hidePieceAt(squareName) {
     const boardWrap = document.querySelector('.board-wrap');
     if (!boardWrap) return null;
@@ -1689,12 +1745,236 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
   }
 
+  // ============================================================
+  // Eval graph
+  // ============================================================
+  // Renders a lichess-style "mountain" chart: white area fills above the
+  // midline where White is winning, black area fills below where Black is
+  // winning. Markers show blunders/mistakes/brilliants. A vertical line
+  // shows the current cursor position.
+  function renderEvalGraph() {
+    const card = document.getElementById('eval-graph-card');
+    const svg = document.getElementById('eval-graph-svg');
+    if (!card || !svg) return;
+
+    // Only show once the game has been analyzed
+    const hasData = history.length > 0 &&
+      history.some(m => m.evalBefore !== null && m.evalBefore !== undefined);
+    if (!hasData) {
+      card.classList.remove('show');
+      return;
+    }
+    card.classList.add('show');
+
+    svg.innerHTML = '';
+
+    const W = 400;
+    const H = 120;
+    const MID = H / 2;
+
+    // Build the series of eval values at each ply boundary:
+    // evalBefore of move 1, evalAfter of move 1, evalBefore of move 2, ...
+    // Simpler: use evalAfter of every move, plus START value of 0 at ply 0.
+    const points = [{ ply: 0, cp: 0 }];
+    for (let i = 0; i < history.length; i++) {
+      const mv = history[i];
+      let cp = mv.evalAfter;
+      if (cp === null || cp === undefined) {
+        // If missing, fall back to evalBefore or last known
+        cp = (mv.evalBefore !== null && mv.evalBefore !== undefined)
+          ? mv.evalBefore
+          : (points[points.length - 1] ? points[points.length - 1].cp : 0);
+      }
+      // Convert mate scores — clamp to ±2000 for the graph
+      cp = Math.max(-2000, Math.min(2000, cp));
+      points.push({ ply: i + 1, cp });
+    }
+
+    // Clamp mapping: cp ±2000 maps to y 0..H with MID at 0.00
+    const cpToY = (cp) => {
+      const norm = Math.max(-1, Math.min(1, cp / 2000));
+      return MID - norm * (MID - 4);
+    };
+    const plyToX = (ply) => {
+      if (points.length <= 1) return 0;
+      return (ply / (points.length - 1)) * W;
+    };
+
+    // ---- Background: black top + white bottom (default state) ----
+    const bgBlack = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bgBlack.setAttribute('class', 'bg-black');
+    bgBlack.setAttribute('x', 0);
+    bgBlack.setAttribute('y', 0);
+    bgBlack.setAttribute('width', W);
+    bgBlack.setAttribute('height', H);
+    svg.appendChild(bgBlack);
+
+    const bgWhite = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bgWhite.setAttribute('class', 'bg-white');
+    bgWhite.setAttribute('x', 0);
+    bgWhite.setAttribute('y', MID);
+    bgWhite.setAttribute('width', W);
+    bgWhite.setAttribute('height', MID);
+    svg.appendChild(bgWhite);
+
+    // ---- Midline (0.00) ----
+    const mid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    mid.setAttribute('class', 'midline');
+    mid.setAttribute('x1', 0);
+    mid.setAttribute('x2', W);
+    mid.setAttribute('y1', MID);
+    mid.setAttribute('y2', MID);
+    svg.appendChild(mid);
+
+    // ---- White area path (from midline to eval, when eval > 0) ----
+    // Simpler approach: draw a filled polygon for the eval curve,
+    // colored white above the midline, black below.
+    // We do this by drawing two paths:
+    //   1. "White advantage" polygon: fills between midline and curve
+    //      when the curve is above the midline.
+    //   2. "Black advantage" polygon: fills between midline and curve
+    //      when the curve is below the midline.
+    // Both can be represented as two overlaid polygons.
+
+    // Build polygon for the "filled from midline" shape. This is a
+    // single filled region that alternates sides. To color it correctly
+    // we use an SVG clipPath approach — but simpler: just draw a thick
+    // stroke along the curve using two colors is complex.
+    //
+    // Easiest correct approach: draw the region as a stack of small
+    // rectangles, one per line segment, colored by the sign of the eval.
+    // Overkill for 60 plies.
+
+    // Simpler visual: draw the eval path as a filled polygon from the
+    // midline up to the curve when the curve is above, and down when
+    // below. Use two paths split at sign changes.
+
+    // Compute sign-segmented polygons.
+    const whitePolyPts = [];
+    const blackPolyPts = [];
+
+    // Prepend midpoint of first point to close polygons
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const x = plyToX(p.ply);
+      const y = cpToY(p.cp);
+      const above = p.cp >= 0;
+
+      if (above) {
+        whitePolyPts.push({ x, y, midY: MID, side: 'above' });
+      } else {
+        blackPolyPts.push({ x, y, midY: MID, side: 'below' });
+      }
+    }
+
+    // White polygon: for each contiguous "above" run, draw a polygon
+    // from midline -> curve -> back to midline.
+    function drawSegmentedPolygon(pts, above) {
+      if (!pts.length) return;
+      // Group contiguous runs, adding transition points where the curve
+      // crosses the midline.
+      const runs = [];
+      let current = [];
+      let lastX = null;
+
+      // Fill in gaps: we need continuous pts. Rebuild from the original
+      // series to keep mid-line intersections.
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        const x = plyToX(p.ply);
+        const y = cpToY(p.cp);
+        const isAbove = p.cp >= 0;
+        if (isAbove === above) {
+          if (!current.length && lastX !== null && lastX.x !== null) {
+            // Insert crossing point at midline
+            current.push({ x: lastX.x, y: MID });
+          }
+          current.push({ x, y });
+        } else {
+          if (current.length) {
+            // Close the run with a midline point at current x
+            current.push({ x, y: MID });
+            runs.push(current);
+            current = [];
+          }
+        }
+        lastX = { x };
+      }
+      if (current.length) {
+        // Extend last run to the right edge if it ends above
+        const last = points[points.length - 1];
+        current.push({ x: plyToX(last.ply), y: MID });
+        runs.push(current);
+      }
+
+      for (const run of runs) {
+        if (run.length < 2) continue;
+        const polyPts = [];
+        polyPts.push(`${run[0].x},${MID}`);
+        for (const pt of run) polyPts.push(`${pt.x},${pt.y}`);
+        polyPts.push(`${run[run.length - 1].x},${MID}`);
+        const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        poly.setAttribute('points', polyPts.join(' '));
+        poly.setAttribute('fill', above ? '#ffffff' : '#0a0e16');
+        svg.appendChild(poly);
+      }
+    }
+
+    drawSegmentedPolygon(points, true);
+    drawSegmentedPolygon(points, false);
+
+    // ---- Markers for notable moves ----
+    const markerClasses = {
+      brilliant: 'marker-brilliant',
+      blunder: 'marker-blunder',
+      mistake: 'marker-mistake',
+      miss: 'marker-miss'
+    };
+    for (let i = 0; i < history.length; i++) {
+      const mv = history[i];
+      const cls = markerClasses[mv.cls];
+      if (!cls) continue;
+      const p = points[i + 1];
+      if (!p) continue;
+      const x = plyToX(p.ply);
+      const y = cpToY(p.cp);
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('class', 'marker ' + cls);
+      dot.setAttribute('cx', x);
+      dot.setAttribute('cy', y);
+      dot.setAttribute('r', 3);
+      svg.appendChild(dot);
+    }
+
+    // ---- Cursor line at current ply ----
+    if (cursor > 0 && cursor <= history.length) {
+      const x = plyToX(cursor);
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('class', 'cursor-line');
+      line.setAttribute('x1', x);
+      line.setAttribute('x2', x);
+      line.setAttribute('y1', 0);
+      line.setAttribute('y2', H);
+      svg.appendChild(line);
+    }
+
+    // ---- Click handler: jump to ply at click x ----
+    svg.onclick = (evt) => {
+      const rect = svg.getBoundingClientRect();
+      const relX = evt.clientX - rect.left;
+      const frac = Math.max(0, Math.min(1, relX / rect.width));
+      const ply = Math.round(frac * (points.length - 1));
+      if (ply >= 0 && ply <= history.length) gotoPly(ply);
+    };
+  }
+
   function renderAll(options) {
     renderBoard(options);
     renderStatus();
     renderMoves();
     renderNavButtons();
     renderCaptured();
+    renderEvalGraph();
     scheduleAutoAnalyze();
   }
 
@@ -1789,6 +2069,7 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('accBlack').classList.remove('show');
     document.getElementById('accWhite').textContent = '';
     document.getElementById('accBlack').textContent = '';
+    document.getElementById('eval-graph-card').classList.remove('show');
     renderPlayerStrips({});
     renderAll({ skipAnimation: true });
   };
@@ -2387,6 +2668,7 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('reviewNext').onclick = () => {
     document.getElementById('review-screen').classList.remove('active');
     updateAccuracyDisplay();
+    renderEvalGraph();
     gotoPly(0);
   };
 
@@ -2417,6 +2699,7 @@ window.addEventListener('chessjs-ready', () => {
 
     renderMoves();
     renderBoardOverlay();
+    renderEvalGraph();
 
     showReviewScreen();
   };
@@ -2469,7 +2752,7 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
     }
   };
 
-  window.addEventListener('resize', () => { renderBoardOverlay(); renderArrow(); });
+  window.addEventListener('resize', () => { renderBoardOverlay(); renderArrow(); renderEvalGraph(); });
 
   renderPlayerStrips({});
   renderAll({ skipAnimation: true });
@@ -2485,6 +2768,7 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
   window.materialCount = materialCount;
   window.computeAccuracy = computeAccuracy;
   window.computeClassificationCounts = computeClassificationCounts;
+  window.renderEvalGraph = renderEvalGraph;
 
 });
 </script>
