@@ -87,7 +87,6 @@
       gap: 10px;
     }
 
-    /* ---------- Topbar ---------- */
     .topbar {
       display: flex;
       align-items: center;
@@ -139,7 +138,6 @@
     .engine-chip .val-primary { color: var(--primary); font-weight: 600; }
     .engine-chip .val-secondary { color: var(--secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
 
-    /* ---------- Player strips ---------- */
     .player-strip {
       display: flex;
       align-items: center;
@@ -188,6 +186,17 @@
       background: var(--surface-highest);
       color: var(--text-variant);
     }
+    .player-accuracy {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(78,222,163,0.12);
+      color: var(--primary);
+      display: none;
+    }
+    .player-accuracy.show { display: inline-block; }
     .player-country { font-family: var(--font-mono); font-size: 10px; color: var(--outline); }
     .player-captured {
       display: flex;
@@ -228,7 +237,6 @@
       border-color: transparent;
     }
 
-    /* ---------- Board wrapper ---------- */
     .board-shell {
       position: relative;
       background: rgba(28,32,40,0.7);
@@ -245,7 +253,7 @@
       width: 100%;
     }
 
-    /* Eval bar — orientation fixed: fills FROM TOP for White, FROM BOTTOM for Black */
+    /* White at bottom, black at top — matching standard chess.com orientation */
     .eval-bar {
       width: 34px;
       border-radius: 6px;
@@ -266,12 +274,10 @@
       font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 600;
-      background: rgba(10,14,22,0.9);
+      background: rgba(10,14,22,0.85);
       color: var(--outline);
       z-index: 5;
     }
-    /* The white portion — anchored to the TOP, height = White's share */
-    /* White portion — anchored to the BOTTOM. Height = White's share of the bar. */
     .eval-bar .eval-fill {
       position: absolute;
       left: 0;
@@ -282,7 +288,6 @@
       transition: height 0.35s ease;
       z-index: 2;
     }
-    /* Subtle accent line at the boundary between white and black. */
     .eval-bar .eval-fill::before {
       content: "";
       position: absolute;
@@ -293,7 +298,6 @@
       background: var(--primary);
       box-shadow: 0 0 8px var(--primary);
     }
-    /* The score tag sits at bottom, always readable */
     .eval-bar .score-tag {
       width: 100%;
       text-align: center;
@@ -310,7 +314,6 @@
       color: #e6e9ee;
     }
 
-    /* Board */
     .board-wrap {
       position: relative;
       flex: 1;
@@ -346,15 +349,11 @@
       z-index: 9;
     }
 
-    /* Piece glide animation
-       chessboard.js swaps pieces between squares via absolute positioning;
-       a CSS transition on transform gives a soft glide when pieces move. */
     .board-b72b1 .piece-417db,
     .board-b72b1 img[data-piece] {
       transition: transform 0.18s ease-out;
     }
 
-    /* ---------- Playback dock ---------- */
     .playback {
       background: rgba(24,28,36,0.85);
       backdrop-filter: blur(12px);
@@ -422,7 +421,6 @@
       min-height: 18px;
     }
 
-    /* ---------- Sidebar ---------- */
     .sidebar {
       background: rgba(15,19,28,0.9);
       border-left: 1px solid var(--line);
@@ -524,7 +522,6 @@
     .row { display: flex; gap: 8px; margin-top: 8px; }
     .row > * { flex: 1; }
 
-    /* ---------- Moves card with tabs ---------- */
     .moves-card { display: flex; flex-direction: column; min-height: 0; }
 
     .tab-switch {
@@ -557,7 +554,6 @@
     }
     .tab-switch button:hover:not(.active) { color: var(--text); }
 
-    /* Move list view */
     .move-list {
       max-height: 300px;
       overflow-y: auto;
@@ -601,7 +597,6 @@
       flex-shrink: 0;
     }
 
-    /* Present Move view (hero) */
     .present-move {
       display: flex;
       flex-direction: column;
@@ -643,7 +638,6 @@
     .hero-badge:hover { transform: scale(1.05); }
     .hero-badge-empty { background: var(--surface-highest); color: var(--outline); font-size: 20px; }
 
-    /* Hero badge backgrounds by classification — solid colour + white icon */
     .hero-badge.cls-brilliant  { background-color: #26c2a3; }
     .hero-badge.cls-great      { background-color: #749bbf; }
     .hero-badge.cls-best       { background-color: #7fb85c; }
@@ -771,6 +765,7 @@
           <div class="player-name-row">
             <span class="player-name" id="nameBlack">Black</span>
             <span class="player-elo" id="eloBlack">—</span>
+            <span class="player-accuracy" id="accBlack"></span>
             <span class="player-country" id="countryBlack"></span>
           </div>
           <div class="player-captured">
@@ -802,6 +797,7 @@
           <div class="player-name-row">
             <span class="player-name" id="nameWhite">White</span>
             <span class="player-elo" id="eloWhite">—</span>
+            <span class="player-accuracy" id="accWhite"></span>
             <span class="player-country" id="countryWhite"></span>
           </div>
           <div class="player-captured">
@@ -958,7 +954,7 @@ window.addEventListener('chessjs-ready', () => {
   let game = new Chess();
   let history = [];
   let cursor = 0;
-  let movesViewMode = 'present'; // 'present' | 'list'
+  let movesViewMode = 'present';
 
   function onDrop(source, target) {
     try {
@@ -968,14 +964,14 @@ window.addEventListener('chessjs-ready', () => {
         san: move.san, fen: game.fen(),
         uci: move.from + move.to + (move.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
-        evalBefore: null, evalAfter: null
+        evalBefore: null, evalAfter: null,
+        moverIsWhite: null
       });
       cursor = history.length;
       renderAll();
     } catch (e) { return 'snapback'; }
   }
 
-  // ---------- Board overlay (classification badges) ----------
   function renderBoardOverlay() {
     const overlay = document.getElementById('board-overlay');
     if (!overlay) return;
@@ -1000,7 +996,6 @@ window.addEventListener('chessjs-ready', () => {
     overlay.appendChild(badge);
   }
 
-  // ---------- Best-move arrow ----------
   function renderArrow() {
     const svg = document.getElementById('arrow-svg');
     if (!svg) return;
@@ -1061,7 +1056,6 @@ window.addEventListener('chessjs-ready', () => {
     renderArrow();
   }
 
-  // ---------- Player strips ----------
   function renderPlayerStrips(pgnHeaders) {
     const h = pgnHeaders || {};
     document.getElementById('nameWhite').textContent = h.White || 'White';
@@ -1131,7 +1125,6 @@ window.addEventListener('chessjs-ready', () => {
     }
   }
 
-  // ---------- Status ----------
   function renderStatus() {
     const turn = game.turn() === 'w' ? 'White' : 'Black';
     let msg = turn + ' to move';
@@ -1144,7 +1137,6 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
-  // ---------- Moves (list + hero) ----------
   function badgeFor(cls) {
     if (!cls) return '';
     return `<span class="badge cls-${cls}"></span>`;
@@ -1203,7 +1195,6 @@ window.addEventListener('chessjs-ready', () => {
     const mv = history[cursor - 1];
     heroText.textContent = mv.san;
 
-    // Reset any prior classes / inline image
     heroBadge.className = 'hero-badge';
     heroBadge.textContent = '';
 
@@ -1255,11 +1246,9 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('prev').onclick  = () => gotoPly(cursor - 1);
   document.getElementById('next').onclick  = () => gotoPly(cursor + 1);
   document.getElementById('last').onclick  = () => gotoPly(history.length);
-
   document.getElementById('heroPrev').onclick = () => gotoPly(cursor - 1);
   document.getElementById('heroNext').onclick = () => gotoPly(cursor + 1);
 
-  // Tab switching
   document.getElementById('tabPresentMove').onclick = () => {
     movesViewMode = 'present';
     document.getElementById('tabPresentMove').classList.add('active');
@@ -1299,7 +1288,8 @@ window.addEventListener('chessjs-ready', () => {
         san: m.san, fen: replay.fen(),
         uci: m.from + m.to + (m.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
-        evalBefore: null, evalAfter: null
+        evalBefore: null, evalAfter: null,
+        moverIsWhite: null
       });
     }
     history = newHistory;
@@ -1325,11 +1315,14 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('fenInput').value = '';
     document.getElementById('analyzeAllStatus').textContent = '';
     document.getElementById('aiOutput').innerHTML = '<em>Load a game, analyze it, then click a move and hit Explain.</em>';
+    document.getElementById('accWhite').classList.remove('show');
+    document.getElementById('accBlack').classList.remove('show');
+    document.getElementById('accWhite').textContent = '';
+    document.getElementById('accBlack').textContent = '';
     renderPlayerStrips({});
     renderAll();
   };
 
-  // ---------- Stockfish ----------
   let sf = null;
   let sfReady = false;
   let analyzingAll = false;
@@ -1431,21 +1424,18 @@ window.addEventListener('chessjs-ready', () => {
           }
           document.getElementById('engineDepthChip').textContent = depth !== null ? depth : '—';
 
-          // Eval bar — White anchored at bottom. Height = White's share (0..100).
+          // Eval bar — White anchored at bottom, height = White's share (0..100)
           let whiteSharePct = 50;
           if (mate !== null && mate !== undefined) {
-            // Mate: bar becomes fully the winner's colour.
             const whiteMate = turn === 'w' ? mate : -mate;
             whiteSharePct = whiteMate > 0 ? 100 : 0;
           } else if (score !== null) {
             const cpWhite = turn === 'w' ? score : -score;
-            // Map [-2000..+2000] cp to [0..100]%. Wider range so +10
-            // pawns essentially fills the bar, matching the diagram.
             const clamped = Math.max(-2000, Math.min(2000, cpWhite));
             whiteSharePct = 50 + (clamped / 2000) * 50;
           }
           document.getElementById('evalFill').style.height = whiteSharePct + '%';
-          
+
           if (score !== null) {
             const s = formatScore('cp', score, turn);
             const tag = document.getElementById('evalScoreTag');
@@ -1802,6 +1792,7 @@ window.addEventListener('chessjs-ready', () => {
     const postCpMover = moverIsWhite ? post.cpWhite : -post.cpWhite;
     mv.evalBefore = preCpMover;
     mv.evalAfter  = postCpMover;
+    mv.moverIsWhite = moverIsWhite;
     const clamp = v => Math.max(-1000, Math.min(1000, v));
     const preWin  = cpToWinProb(clamp(preCpMover));
     const postWin = cpToWinProb(clamp(postCpMover));
@@ -1836,6 +1827,50 @@ window.addEventListener('chessjs-ready', () => {
     return 'blunder';
   }
 
+  // ---------- Accuracy ----------
+  // Lichess-style conversion of average centipawn loss to a 0-100% score.
+  function cpLossToAccuracy(avgCpLoss) {
+    const a = 103.1668 * Math.exp(-0.04354 * avgCpLoss / 10) - 3.1669;
+    return Math.max(0, Math.min(100, a));
+  }
+
+  function computeAccuracy() {
+    let wTotal = 0, wCount = 0;
+    let bTotal = 0, bCount = 0;
+
+    for (const mv of history) {
+      if (mv.cpLoss === null || mv.cpLoss === undefined) continue;
+      if (mv.moverIsWhite === null || mv.moverIsWhite === undefined) continue;
+      if (mv.moverIsWhite) { wTotal += mv.cpLoss; wCount++; }
+      else                 { bTotal += mv.cpLoss; bCount++; }
+    }
+
+    const wAvg = wCount ? wTotal / wCount : 0;
+    const bAvg = bCount ? bTotal / bCount : 0;
+
+    return {
+      white: wCount ? cpLossToAccuracy(wAvg) : null,
+      black: bCount ? cpLossToAccuracy(bAvg) : null,
+      whiteMoves: wCount,
+      blackMoves: bCount
+    };
+  }
+
+  function updateAccuracyDisplay() {
+    const acc = computeAccuracy();
+    const wEl = document.getElementById('accWhite');
+    const bEl = document.getElementById('accBlack');
+
+    if (acc.white !== null) {
+      wEl.textContent = acc.white.toFixed(1) + '% acc';
+      wEl.classList.add('show');
+    }
+    if (acc.black !== null) {
+      bEl.textContent = acc.black.toFixed(1) + '% acc';
+      bEl.classList.add('show');
+    }
+  }
+
   document.getElementById('analyzeAllBtn').onclick = async () => {
     if (analyzingAll || !sfReady || history.length === 0) return;
     analyzingAll = true;
@@ -1854,6 +1889,7 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('analyzeAllStatus').textContent = 'Done.';
     renderMoves();
     renderBoardOverlay();
+    updateAccuracyDisplay();
   };
 
   document.getElementById('aiExplainBtn').onclick = async () => {
@@ -1924,6 +1960,7 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
   window.isBrilliant = isBrilliant;
   window.isMiss = isMiss;
   window.materialCount = materialCount;
+  window.computeAccuracy = computeAccuracy;
 
 });
 </script>
