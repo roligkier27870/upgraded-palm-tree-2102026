@@ -359,7 +359,7 @@
       pointer-events: none;
       z-index: 9;
     }
-    #flying-piece {
+    .flying-piece {
       position: absolute;
       pointer-events: none;
       z-index: 20;
@@ -1329,16 +1329,38 @@ window.addEventListener('chessjs-ready', () => {
     svg.appendChild(circle);
   }
 
-  // ---------- Flying piece animation ----------
-  // Finds the mover's piece that changed squares. Works for captures too,
-  // because we identify the piece by its side (the mover's color from the
-  // "from" position's turn field) and track where it went.
-  function animatePieceMove(fromFen, toFen, onComplete) {
-    if (!fromFen || !toFen || fromFen === toFen) {
-      onComplete();
-      return;
-    }
+  // ---------- Board animation helpers ----------
 
+  // Hide the chessboard.js piece rendered on a given square.
+  // Returns a function that restores its visibility.
+  function hidePieceAt(squareName) {
+    const boardWrap = document.querySelector('.board-wrap');
+    if (!boardWrap) return null;
+
+    const size = boardWrap.clientWidth;
+    const sq = size / 8;
+    const fileIdx = squareName.charCodeAt(0) - 97;
+    const rankIdx = 8 - parseInt(squareName[1], 10);
+    const targetX = fileIdx * sq;
+    const targetY = rankIdx * sq;
+
+    const pieces = boardWrap.querySelectorAll('img');
+    for (const img of pieces) {
+      const left = parseFloat(img.style.left);
+      const top  = parseFloat(img.style.top);
+      if (isNaN(left) || isNaN(top)) continue;
+      if (Math.abs(left - targetX) < 3 && Math.abs(top - targetY) < 3) {
+        const prev = img.style.visibility;
+        img.style.visibility = 'hidden';
+        return () => { img.style.visibility = prev || 'visible'; };
+      }
+    }
+    return null;
+  }
+
+  // Given two FENs and the color of the mover, return the list of
+  // { from, to, piece } movements performed by that side.
+  function detectMoves(fromFen, toFen) {
     const parseBoard = (fen) => {
       const out = {};
       const ranks = fen.split(' ')[0].split('/');
@@ -1358,96 +1380,154 @@ window.addEventListener('chessjs-ready', () => {
     const from = parseBoard(fromFen);
     const to = parseBoard(toFen);
 
-    // Whose move was it? Read the "from" position's turn field.
-    const moverColor = fromFen.split(' ')[1];  // 'w' or 'b'
+    const moverColor = fromFen.split(' ')[1]; // 'w' or 'b'
     const isMoverPiece = (ch) => {
       if (!ch) return false;
       const isWhitePiece = ch === ch.toUpperCase();
       return moverColor === 'w' ? isWhitePiece : !isWhitePiece;
     };
 
-    // Find the mover's piece that disappeared from its old square,
-    // and where it reappeared.
-    let fromSq = null, toSq = null;
+    const squaresGone = [];   // squares where a mover's piece used to be
+    const squaresArrived = []; // squares where a mover's piece now is
+
     for (const sq in from) {
       if (!isMoverPiece(from[sq])) continue;
-      // If this square no longer has the same piece, the piece left here
-      if (to[sq] !== from[sq]) {
-        fromSq = sq;
-      }
+      if (to[sq] !== from[sq]) squaresGone.push(sq);
     }
     for (const sq in to) {
       if (!isMoverPiece(to[sq])) continue;
-      // If this square has a mover's piece that wasn't here before, it arrived here
-      if (from[sq] !== to[sq]) {
-        // But we need to make sure it's not the same piece sitting still
-        // — check that from[sq] wasn't already this piece
-        toSq = sq;
-      }
+      if (from[sq] !== to[sq]) squaresArrived.push(sq);
     }
 
-    // Handle promotion: the pawn moved but the piece that arrived is not
-    // the same type. In that case we can't match easily; just skip animation.
-    if (!fromSq || !toSq) { onComplete(); return; }
-
-    // Castling: two mover pieces move. fromSq/toSq will be whichever the
-    // loop hit last (arbitrary). Skip animation to avoid the wrong piece
-    // sliding.
-    // Detect castling by checking if two of the mover's pieces changed squares.
-    let moverPiecesMoved = 0;
-    for (const sq in from) {
-      if (!isMoverPiece(from[sq])) continue;
-      if (to[sq] !== from[sq]) moverPiecesMoved++;
-    }
-    if (moverPiecesMoved > 1) { onComplete(); return; }
-
-    const pieceChar = to[toSq];
     const pieceMap = {
       K:'wK', Q:'wQ', R:'wR', B:'wB', N:'wN', P:'wP',
       k:'bK', q:'bQ', r:'bR', b:'bB', n:'bN', p:'bP'
     };
-    const piece = pieceMap[pieceChar];
-    if (!piece) { onComplete(); return; }
+
+    // Simple case: exactly one mover piece moved.
+    if (squaresGone.length === 1 && squaresArrived.length === 1) {
+      const fromSq = squaresGone[0];
+      const toSq = squaresArrived[0];
+      const pieceChar = to[toSq];
+      const piece = pieceMap[pieceChar];
+      if (!piece) return [];
+      return [{ from: fromSq, to: toSq, piece }];
+    }
+
+    // Castling: exactly two mover pieces moved, and they are a king + rook
+    // of the same color. Match each gone square to the nearest arrived
+    // square of the same piece type.
+    if (squaresGone.length === 2 && squaresArrived.length === 2) {
+      const moves = [];
+      const remainingArrived = squaresArrived.slice();
+      for (const fromSq of squaresGone) {
+        const pieceChar = from[fromSq];
+        const piece = pieceMap[pieceChar];
+        if (!piece) continue;
+        // Find an arrived square that now holds the same type of piece and
+        // is closest to fromSq.
+        let bestIdx = -1;
+        let bestDist = Infinity;
+        for (let i = 0; i < remainingArrived.length; i++) {
+          const toSq = remainingArrived[i];
+          if (to[toSq] !== pieceChar) continue;
+          const d = distance(fromSq, toSq);
+          if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        if (bestIdx === -1) continue;
+        const toSq = remainingArrived[bestIdx];
+        remainingArrived.splice(bestIdx, 1);
+        moves.push({ from: fromSq, to: toSq, piece });
+      }
+      return moves;
+    }
+
+    // Anything else (promotion, or unrecognized) — no animation.
+    return [];
+  }
+
+  function distance(sq1, sq2) {
+    const f1 = sq1.charCodeAt(0) - 97;
+    const r1 = parseInt(sq1[1], 10);
+    const f2 = sq2.charCodeAt(0) - 97;
+    const r2 = parseInt(sq2[1], 10);
+    return Math.abs(f1 - f2) + Math.abs(r1 - r2);
+  }
+
+  // Animate the piece(s) moving from `fromFen` to `toFen`. Calls onComplete
+  // once every flying piece has landed and the sources have been restored.
+  function animatePieceMove(fromFen, toFen, onComplete) {
+    if (!fromFen || !toFen || fromFen === toFen) {
+      onComplete();
+      return;
+    }
+
+    const moves = detectMoves(fromFen, toFen);
+    if (!moves.length) { onComplete(); return; }
 
     const boardWrap = document.querySelector('.board-wrap');
     if (!boardWrap) { onComplete(); return; }
     const size = boardWrap.clientWidth;
     const sq = size / 8;
 
-    const fileIdxFrom = fromSq.charCodeAt(0) - 97;
-    const rankIdxFrom = 8 - parseInt(fromSq[1], 10);
-    const fileIdxTo   = toSq.charCodeAt(0) - 97;
-    const rankIdxTo   = 8 - parseInt(toSq[1], 10);
+    const flyingPieces = [];
+    const restoreFuncs = [];
 
-    const x1 = fileIdxFrom * sq;
-    const y1 = rankIdxFrom * sq;
-    const x2 = fileIdxTo * sq;
-    const y2 = rankIdxTo * sq;
+    for (const mv of moves) {
+      const fileIdxFrom = mv.from.charCodeAt(0) - 97;
+      const rankIdxFrom = 8 - parseInt(mv.from[1], 10);
+      const fileIdxTo   = mv.to.charCodeAt(0) - 97;
+      const rankIdxTo   = 8 - parseInt(mv.to[1], 10);
 
-    const flying = document.createElement('div');
-    flying.id = 'flying-piece';
-    flying.style.width = sq + 'px';
-    flying.style.height = sq + 'px';
-    flying.style.left = '0';
-    flying.style.top = '0';
-    flying.style.backgroundImage = `url('icons/${piece}.png')`;
-    flying.style.transform = `translate(${x1}px, ${y1}px)`;
-    boardWrap.appendChild(flying);
+      const x1 = fileIdxFrom * sq;
+      const y1 = rankIdxFrom * sq;
+      const x2 = fileIdxTo * sq;
+      const y2 = rankIdxTo * sq;
 
-    void flying.offsetWidth;
+      // Hide the underlying static piece at the source square so we don't
+      // see a ghost left behind.
+      const restore = hidePieceAt(mv.from);
+      if (restore) restoreFuncs.push(restore);
 
+      const flying = document.createElement('div');
+      flying.className = 'flying-piece';
+      flying.style.width = sq + 'px';
+      flying.style.height = sq + 'px';
+      flying.style.left = '0';
+      flying.style.top = '0';
+      flying.style.backgroundImage = `url('icons/${mv.piece}.png')`;
+      flying.style.transform = `translate(${x1}px, ${y1}px)`;
+      boardWrap.appendChild(flying);
+
+      flyingPieces.push({ el: flying, x2, y2 });
+    }
+
+    // Force reflow so the initial transforms commit.
+    void boardWrap.offsetWidth;
+
+    // Then trigger the transitions.
     requestAnimationFrame(() => {
-      flying.style.transform = `translate(${x2}px, ${y2}px)`;
+      for (const fp of flyingPieces) {
+        fp.el.style.transform = `translate(${fp.x2}px, ${fp.y2}px)`;
+      }
     });
 
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      if (flying.parentNode) flying.parentNode.removeChild(flying);
+      for (const fp of flyingPieces) {
+        if (fp.el.parentNode) fp.el.parentNode.removeChild(fp.el);
+      }
+      for (const restore of restoreFuncs) restore();
       onComplete();
     };
-    flying.addEventListener('transitionend', finish);
+
+    // Whichever transitionend fires first triggers finish; also a hard
+    // timeout as a safety net.
+    if (flyingPieces.length) {
+      flyingPieces[0].el.addEventListener('transitionend', finish);
+    }
     setTimeout(finish, 320);
   }
 
