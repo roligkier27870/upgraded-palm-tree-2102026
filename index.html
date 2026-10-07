@@ -1252,34 +1252,40 @@
 <script>
 window.addEventListener('chessjs-ready', () => {
 
-// ---------- Opening book ----------
-let OPENING_BOOK = {};
-let BOOK_READY = false;
+  // ---------- Opening book ----------
+  let OPENING_BOOK = {};
+  let BOOK_READY = false;
 
   async function loadOpeningBook() {
+    const volumes = ['a', 'b', 'c', 'd', 'e'];
     try {
-      const response = await fetch('data/eco.tsv');
-      const text = await response.text();
-      const lines = text.split('\n');
+      // Fetch all five ECO volumes in parallel
+      const responses = await Promise.all(
+        volumes.map(v => fetch('data/' + v + '.tsv'))
+      );
+      const texts = await Promise.all(responses.map(r => r.text()));
 
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
+      for (const text of texts) {
+        const lines = text.split('\n');
+        for (let i = 1; i < lines.length; i++) {   // skip header
+          const line = lines[i].trim();
+          if (!line) continue;
 
-        // TSV columns: eco, name, pgn, uci, epd
-        const parts = line.split('\t');
-        if (parts.length < 5) continue;
+          // TSV columns: eco, name, pgn, uci, epd
+          const parts = line.split('\t');
+          if (parts.length < 5) continue;
 
-        const eco = parts[0];
-        const name = parts[1];
-        const epd = parts[4];
+          const eco  = parts[0];
+          const name = parts[1];
+          const epd  = parts[4];
 
-        // Use only the piece-placement part of the EPD as the key
-        const fenKey = epd.split(' ')[0];
+          // Use the piece-placement part of the EPD as the key
+          const fenKey = epd.split(' ')[0];
 
-        // Keep the first (most specific) name for each position
-        if (!OPENING_BOOK[fenKey]) {
-          OPENING_BOOK[fenKey] = { eco, name };
+          // Keep the first (most specific) name for each position
+          if (!OPENING_BOOK[fenKey]) {
+            OPENING_BOOK[fenKey] = { eco, name };
+          }
         }
       }
 
