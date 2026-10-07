@@ -1859,6 +1859,12 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
+  function badgeFor(cls, pending) {
+    if (cls) return `<span class="badge cls-${cls}"></span>`;
+    if (pending) return `<span class="badge pending"></span>`;
+    return '';
+  }
+  
   function renderMoves() {
     const el = document.getElementById('moveList');
     if (history.length === 0) {
