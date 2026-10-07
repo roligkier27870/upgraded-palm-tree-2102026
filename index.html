@@ -1252,28 +1252,28 @@
 <script>
 window.addEventListener('chessjs-ready', () => {
 
-  // ---------- Opening book ----------
+    // ---------- Opening book ----------
   let OPENING_BOOK = {};
   let BOOK_READY = false;
 
   async function loadOpeningBook() {
     const volumes = ['a', 'b', 'c', 'd', 'e'];
     try {
-      // Fetch all five ECO volumes in parallel
       const responses = await Promise.all(
         volumes.map(v => fetch('data/' + v + '.tsv'))
       );
       const texts = await Promise.all(responses.map(r => r.text()));
 
       let total = 0;
+      let parsed = 0;
+      let failed = 0;
 
       for (const text of texts) {
         const lines = text.split('\n');
-        for (let i = 1; i < lines.length; i++) {   // skip header
+        for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
 
-          // TSV columns: eco, name, pgn
           const parts = line.split('\t');
           if (parts.length < 3) continue;
 
@@ -1282,20 +1282,22 @@ window.addEventListener('chessjs-ready', () => {
           const pgn  = parts[2].trim();
           if (!pgn) continue;
 
-          // Replay the PGN moves to get the resulting position
-          let chess;
-          try {
-            chess = new Chess();
-            // Normalize: chess.js accepts SAN with move numbers
-            chess.loadPgn(pgn);
-          } catch (e) {
-            continue; // skip malformed lines silently
-          }
+          // Tokenize: split on whitespace, drop move numbers like "1." and "1..."
+          const tokens = pgn.split(/\s+/).filter(t => !/^\d+\.+$/.test(t));
 
-          // Use the piece-placement part of the FEN as the key
+          const chess = new Chess();
+          let ok = true;
+          for (const san of tokens) {
+            try {
+              const m = chess.move(san);
+              if (!m) { ok = false; break; }
+            } catch (e) { ok = false; break; }
+          }
+          if (!ok) { failed++; continue; }
+          parsed++;
+
           const fenKey = chess.fen().split(' ')[0];
 
-          // Keep the first (most specific) name for each position
           if (!OPENING_BOOK[fenKey]) {
             OPENING_BOOK[fenKey] = { eco, name };
             total++;
@@ -1304,7 +1306,7 @@ window.addEventListener('chessjs-ready', () => {
       }
 
       BOOK_READY = true;
-      console.log('Opening book loaded:', total, 'positions');
+      console.log('Opening book loaded:', total, 'positions (parsed', parsed, 'lines,', failed, 'failed)');
     } catch (err) {
       console.error('Failed to load opening book:', err);
     }
