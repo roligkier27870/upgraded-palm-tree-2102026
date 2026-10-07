@@ -1265,32 +1265,46 @@ window.addEventListener('chessjs-ready', () => {
       );
       const texts = await Promise.all(responses.map(r => r.text()));
 
+      let total = 0;
+
       for (const text of texts) {
         const lines = text.split('\n');
         for (let i = 1; i < lines.length; i++) {   // skip header
           const line = lines[i].trim();
           if (!line) continue;
 
-          // TSV columns: eco, name, pgn, uci, epd
+          // TSV columns: eco, name, pgn
           const parts = line.split('\t');
-          if (parts.length < 5) continue;
+          if (parts.length < 3) continue;
 
-          const eco  = parts[0];
-          const name = parts[1];
-          const epd  = parts[4];
+          const eco  = parts[0].trim();
+          const name = parts[1].trim();
+          const pgn  = parts[2].trim();
+          if (!pgn) continue;
 
-          // Use the piece-placement part of the EPD as the key
-          const fenKey = epd.split(' ')[0];
+          // Replay the PGN moves to get the resulting position
+          let chess;
+          try {
+            chess = new Chess();
+            // Normalize: chess.js accepts SAN with move numbers
+            chess.loadPgn(pgn);
+          } catch (e) {
+            continue; // skip malformed lines silently
+          }
+
+          // Use the piece-placement part of the FEN as the key
+          const fenKey = chess.fen().split(' ')[0];
 
           // Keep the first (most specific) name for each position
           if (!OPENING_BOOK[fenKey]) {
             OPENING_BOOK[fenKey] = { eco, name };
+            total++;
           }
         }
       }
 
       BOOK_READY = true;
-      console.log('Opening book loaded:', Object.keys(OPENING_BOOK).length, 'positions');
+      console.log('Opening book loaded:', total, 'positions');
     } catch (err) {
       console.error('Failed to load opening book:', err);
     }
