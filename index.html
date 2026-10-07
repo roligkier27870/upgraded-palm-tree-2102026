@@ -2750,7 +2750,6 @@ window.addEventListener('chessjs-ready', () => {
       document.getElementById('analysisSub').textContent = `${i} / ${history.length}`;
       document.getElementById('analysisProgressBar').style.width = ((i / history.length) * 100) + '%';
       await classifyMove(i, depth);
-      mv.pending = false;
       await new Promise(r => setTimeout(r, 0));
     }
 
