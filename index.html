@@ -1259,10 +1259,16 @@ window.addEventListener('chessjs-ready', () => {
   async function loadOpeningBook() {
     const volumes = ['a', 'b', 'c', 'd', 'e'];
     try {
-      const responses = await Promise.all(
-        volumes.map(v => fetch('data/' + v + '.tsv'))
-      );
-      const texts = await Promise.all(responses.map(r => r.text()));
+      let allText = '';
+      for (const v of volumes) {
+        try {
+          const r = await fetch('data/' + v + '.tsv');
+          if (r.ok) allText += await r.text() + '\n';
+        } catch (e) {
+          console.warn('Missing volume', v);
+        }
+      }
+      const texts = [allText];
 
       let total = 0;
       let parsed = 0;
@@ -1296,7 +1302,7 @@ window.addEventListener('chessjs-ready', () => {
           if (!ok) { failed++; continue; }
           parsed++;
 
-          const fenKey = chess.fen().split(' ')[0];
+          const fenKey = chess.fen().split(' ').slice(0, 4).join(' ');
 
           if (!OPENING_BOOK[fenKey]) {
             OPENING_BOOK[fenKey] = { eco, name };
@@ -1842,16 +1848,15 @@ window.addEventListener('chessjs-ready', () => {
     if (game.isCheckmate()) msg = 'Checkmate — ' + (game.turn() === 'w' ? 'Black' : 'White') + ' wins';
     else if (game.isDraw()) msg = 'Draw';
     else if (game.isCheck()) msg = turn + ' is in check';
+
+    // Opening name from the book, if we have one
+    const op = getOpeningName(game.fen());
+    if (op) msg += '  ·  ' + op.eco + ' ' + op.name;
+
     document.getElementById('status').textContent = msg;
     document.getElementById('fenInline').textContent = game.fen();
     document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
-  }
-
-  function badgeFor(cls, pending) {
-    if (cls) return `<span class="badge cls-${cls}"></span>`;
-    if (pending) return `<span class="badge pending"></span>`;
-    return '';
   }
 
   function renderMoves() {
@@ -1936,7 +1941,8 @@ window.addEventListener('chessjs-ready', () => {
     ['next','last'].forEach(id => document.getElementById(id).disabled = cursor >= history.length);
     document.getElementById('heroPrev').disabled = cursor === 0;
     document.getElementById('heroNext').disabled = cursor >= history.length;
-    document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
+    document.getElementById('analyzeAllBtn').disabled =
+      !sfReady || !BOOK_READY || history.length === 0 || analyzingAll;
   }
 
   function renderEvalGraph() {
@@ -2428,30 +2434,28 @@ window.addEventListener('chessjs-ready', () => {
     return { w, b };
   }
 
+    // ---------- Theory lookup against the loaded opening book ----------
   function isTheory(moveIndex, san) {
-    const BOOK = [
-      ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
-      ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],
-      ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],
-      ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],
-      ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],
-      ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],
-      ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],
-      ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],
-      ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],
-      ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],
-      ['c4','e5','Nc3','Nf6','Nf3','Nc6'],
-      ['Nf3','d5','g3','Nf6','Bg2','e6']
-    ];
-    for (const line of BOOK) {
-      if (moveIndex > line.length) continue;
-      let matches = true;
-      for (let i = 0; i < moveIndex - 1; i++) {
-        if (history[i] && history[i].san !== line[i]) { matches = false; break; }
-      }
-      if (matches && line[moveIndex - 1] === san) return true;
-    }
-    return false;
+    if (!BOOK_READY) return false;
+
+    // Position BEFORE the move (EPD form to match the book).
+    const fenBefore = moveIndex === 1 ? START_FEN : history[moveIndex - 2].fen;
+    const fenKey = fenBefore.split(' ').slice(0, 4).join(' ');
+
+    // Position AFTER the move (EPD form) — we need this to confirm the
+    // played move is actually one the book continues with.
+    const fenAfter = history[moveIndex - 1].fen;
+    const fenAfterKey = fenAfter.split(' ').slice(0, 4).join(' ');
+
+    // If either position is in the book, the played move is theory.
+    return !!(OPENING_BOOK[fenKey] || OPENING_BOOK[fenAfterKey]);
+  }
+
+  // Optional: return the opening name for the current position, or null.
+  function getOpeningName(fen) {
+    if (!BOOK_READY) return null;
+    const key = fen.split(' ').slice(0, 4).join(' ');
+    return OPENING_BOOK[key] || null;
   }
 
   function isForced(index) {
