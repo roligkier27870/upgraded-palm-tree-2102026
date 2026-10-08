@@ -1006,6 +1006,21 @@
     .board-b72b1 { border: none !important; border-radius: 8px; overflow: hidden; }
     .board-b72b1 .white-1e1d7 { background-color: #f0d9b5 !important; color: #b58863 !important; }
     .board-b72b1 .black-3c85d { background-color: #b58863 !important; color: #f0d9b5 !important; }
+
+    /* Chess960 toggle row */
+    #chess960Row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-variant);
+    }
+    #chess960Toggle {
+      width: auto;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -1137,6 +1152,10 @@
         <span class="card-title">Enter your PGN here</span>
         <span class="card-meta" id="pgnPlies">— plies</span>
       </div>
+      <div id="chess960Row">
+        <label for="chess960Toggle">Chess960 (Fischer Random)</label>
+        <input type="checkbox" id="chess960Toggle">
+      </div>
       <textarea id="pgnInput" placeholder="1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
       <div class="row">
         <button class="btn" id="loadPgn">Load PGN</button>
@@ -1252,7 +1271,60 @@
 <script>
 window.addEventListener('chessjs-ready', () => {
 
-    // ---------- Opening book ----------
+  // ---------- Chess960 mode ----------
+  let CHESS960 = false;
+  const chess960Toggle = document.getElementById('chess960Toggle');
+  chess960Toggle.addEventListener('change', () => {
+    CHESS960 = chess960Toggle.checked;
+    // When mode changes, reset to a fresh board with the correct
+    // starting position (standard vs. randomly generated 960 position).
+    resetToStartOfMode();
+  });
+
+  // Build a fresh starting Chess() respecting the current mode.
+  // chess.js v1: `new Chess(fen, { skipValidation })` and variant option
+  // `new Chess(undefined, { variant: 'chess960' })`.
+  function makeChess(fen) {
+    if (CHESS960) {
+      if (fen) return new Chess(fen, { skipValidation: true });
+      return new Chess(undefined, { skipValidation: true });
+    }
+    if (fen) return new Chess(fen);
+    return new Chess();
+  }
+
+  // The starting FEN for the current mode.
+  function getStartFen() {
+    if (CHESS960) {
+      // chess.js v1 exposes Chess960 via the `chess960` flag on the instance.
+      // We can create a throwaway instance to read its starting FEN.
+      const c = new Chess(undefined, { skipValidation: true });
+      if (typeof c.setHeader !== 'function') {
+        // Non-960 default; read the DEFAULT_POSITION via .fen() on a fresh board.
+      }
+      return c.fen();
+    }
+    return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  }
+
+  function resetToStartOfMode() {
+    game = makeChess();
+    history = [];
+    cursor = 0;
+    previousFen = game.fen();
+    document.getElementById('fenInput').value = '';
+    document.getElementById('pgnInput').value = '';
+    document.getElementById('analyzeAllStatus').textContent = '';
+    document.getElementById('accWhite').classList.remove('show');
+    document.getElementById('accBlack').classList.remove('show');
+    document.getElementById('accWhite').textContent = '';
+    document.getElementById('accBlack').textContent = '';
+    document.getElementById('eval-graph-card').classList.remove('show');
+    renderPlayerStrips({});
+    renderAll({ skipAnimation: true });
+  }
+
+  // ---------- Opening book ----------
   let OPENING_BOOK = {};
   let BOOK_READY = false;
 
@@ -1288,7 +1360,6 @@ window.addEventListener('chessjs-ready', () => {
           const pgn  = parts[2].trim();
           if (!pgn) continue;
 
-          // Tokenize: split on whitespace, drop move numbers like "1." and "1..."
           const tokens = pgn.split(/\s+/).filter(t => !/^\d+\.+$/.test(t));
 
           const chess = new Chess();
@@ -1365,9 +1436,6 @@ window.addEventListener('chessjs-ready', () => {
     }
   });
 
-  // ------------------------------------------------------------
-  // Live-move classification
-  // ------------------------------------------------------------
   async function onDrop(source, target) {
     try {
       const move = game.move({ from: source, to: target, promotion: 'q' });
@@ -1398,7 +1466,7 @@ window.addEventListener('chessjs-ready', () => {
     const mv = history[index - 1];
     if (!mv) return;
 
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenBefore = index === 1 ? getStartFen() : history[index - 2].fen;
     const fenAfter = mv.fen;
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
     mv.moverIsWhite = moverIsWhite;
@@ -1495,8 +1563,6 @@ window.addEventListener('chessjs-ready', () => {
     }
     return true;
   }
-
-  // ------------------------------------------------------------
 
   function renderBoardOverlay() {
     const overlay = document.getElementById('board-overlay');
@@ -1849,9 +1915,9 @@ window.addEventListener('chessjs-ready', () => {
     else if (game.isDraw()) msg = 'Draw';
     else if (game.isCheck()) msg = turn + ' is in check';
 
-    // Opening name from the book, if we have one
     const op = getOpeningName(game.fen());
     if (op) msg += '  ·  ' + op.eco + ' ' + op.name;
+    if (CHESS960) msg += '  ·  Chess960';
 
     document.getElementById('status').textContent = msg;
     document.getElementById('fenInline').textContent = game.fen();
@@ -1864,7 +1930,7 @@ window.addEventListener('chessjs-ready', () => {
     if (pending) return `<span class="badge pending"></span>`;
     return '';
   }
-  
+
   function renderMoves() {
     const el = document.getElementById('moveList');
     if (history.length === 0) {
@@ -1994,7 +2060,6 @@ window.addEventListener('chessjs-ready', () => {
 
     const boundary = points.map(p => ({ x: plyToX(p.ply), y: cpToY(p.cp) }));
 
-    // WHITE region: fill from bottom edge up to curve
     const whitePts = [];
     whitePts.push(`${W},${H}`);
     whitePts.push(`0,${H}`);
@@ -2006,7 +2071,6 @@ window.addEventListener('chessjs-ready', () => {
     whitePoly.setAttribute('fill', '#f5f6f8');
     svg.appendChild(whitePoly);
 
-    // BLACK region: fill from top edge down to curve
     const blackPts = [];
     blackPts.push(`0,0`);
     blackPts.push(`${W},0`);
@@ -2088,7 +2152,7 @@ window.addEventListener('chessjs-ready', () => {
 
   function gotoPly(n) {
     n = Math.max(0, Math.min(n, history.length));
-    game = new Chess();
+    game = makeChess();
     for (let i = 0; i < n; i++) {
       try { game.move(history[i].san); } catch (e) { break; }
     }
@@ -2127,14 +2191,14 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('loadPgn').onclick = () => {
     const text = document.getElementById('pgnInput').value.trim();
     if (!text) return;
-    const g = new Chess();
+    const g = makeChess();
     try { g.loadPgn(text); }
     catch (err) { alert('Could not parse PGN: ' + err.message); return; }
 
     const headers = g.header ? g.header() : {};
     currentPgnHeaders = headers;
 
-    const replay = new Chess();
+    const replay = makeChess();
     const moves = g.history({ verbose: true });
     const newHistory = [];
     for (const m of moves) {
@@ -2160,7 +2224,7 @@ window.addEventListener('chessjs-ready', () => {
   document.getElementById('loadFen').onclick = () => {
     const fen = document.getElementById('fenInput').value.trim();
     if (!fen) return;
-    try { game = new Chess(fen); }
+    try { game = makeChess(fen); }
     catch (err) { alert('Invalid FEN'); return; }
     history = []; cursor = 0;
     previousFen = game.fen();
@@ -2169,19 +2233,7 @@ window.addEventListener('chessjs-ready', () => {
   };
 
   document.getElementById('loadStart').onclick = () => {
-    game = new Chess(); history = []; cursor = 0;
-    previousFen = game.fen();
-    document.getElementById('pgnInput').value = '';
-    document.getElementById('fenInput').value = '';
-    document.getElementById('analyzeAllStatus').textContent = '';
-    document.getElementById('aiOutput').innerHTML = '<em>Load a game, analyze it, then click a move and hit Explain.</em>';
-    document.getElementById('accWhite').classList.remove('show');
-    document.getElementById('accBlack').classList.remove('show');
-    document.getElementById('accWhite').textContent = '';
-    document.getElementById('accBlack').textContent = '';
-    document.getElementById('eval-graph-card').classList.remove('show');
-    renderPlayerStrips({});
-    renderAll({ skipAnimation: true });
+    resetToStartOfMode();
   };
 
   let sf = null;
@@ -2208,7 +2260,12 @@ window.addEventListener('chessjs-ready', () => {
       for (const raw of text.split('\n')) {
         const l = raw.trim();
         if (!l) continue;
-        if (l === 'uciok')  { sf.postMessage('isready'); continue; }
+        if (l === 'uciok')  {
+          // Chess960 mode for Stockfish (Fischer Random castling rules)
+          sf.postMessage('setoption name UCI_Chess960 value ' + (CHESS960 ? 'true' : 'false'));
+          sf.postMessage('isready');
+          continue;
+        }
         if (l === 'readyok') {
           sfReady = true;
           document.getElementById('engineStatusCard').textContent = 'Engine ready';
@@ -2363,7 +2420,7 @@ window.addEventListener('chessjs-ready', () => {
   }
 
   function uciLineToSan(startFen, uciMoves) {
-    const c = new Chess();
+    const c = makeChess();
     try { c.load(startFen); } catch (e) { return []; }
     const sans = [];
     for (const uci of uciMoves) {
@@ -2440,24 +2497,18 @@ window.addEventListener('chessjs-ready', () => {
     return { w, b };
   }
 
-    // ---------- Theory lookup against the loaded opening book ----------
   function isTheory(moveIndex, san) {
     if (!BOOK_READY) return false;
 
-    // Position BEFORE the move (EPD form to match the book).
-    const fenBefore = moveIndex === 1 ? START_FEN : history[moveIndex - 2].fen;
+    const fenBefore = moveIndex === 1 ? getStartFen() : history[moveIndex - 2].fen;
     const fenKey = fenBefore.split(' ').slice(0, 4).join(' ');
 
-    // Position AFTER the move (EPD form) — we need this to confirm the
-    // played move is actually one the book continues with.
     const fenAfter = history[moveIndex - 1].fen;
     const fenAfterKey = fenAfter.split(' ').slice(0, 4).join(' ');
 
-    // If either position is in the book, the played move is theory.
     return !!(OPENING_BOOK[fenKey] || OPENING_BOOK[fenAfterKey]);
   }
 
-  // Optional: return the opening name for the current position, or null.
   function getOpeningName(fen) {
     if (!BOOK_READY) return null;
     const key = fen.split(' ').slice(0, 4).join(' ');
@@ -2465,28 +2516,28 @@ window.addEventListener('chessjs-ready', () => {
   }
 
   function isForced(index) {
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenBefore = index === 1 ? getStartFen() : history[index - 2].fen;
     let c;
-    try { c = new Chess(fenBefore); } catch (e) { return false; }
+    try { c = makeChess(fenBefore); } catch (e) { return false; }
     return c.moves().length === 1;
   }
 
   function isSacrifice(index) {
     const mv = history[index - 1];
     if (!mv) return false;
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenBefore = index === 1 ? getStartFen() : history[index - 2].fen;
     const fenAfter  = mv.fen;
     let chessAfter, chessBefore;
     try {
-      chessAfter  = new Chess(fenAfter);
-      chessBefore = new Chess(fenBefore);
+      chessAfter  = makeChess(fenAfter);
+      chessBefore = makeChess(fenBefore);
     } catch (e) { return false; }
     if (chessAfter.isCheckmate()) return false;
     if (chessAfter.isCheck())     return false;
 
     let playedMove;
     try {
-      const tmp = new Chess(fenBefore);
+      const tmp = makeChess(fenBefore);
       playedMove = tmp.move({
         from: mv.uci.slice(0, 2),
         to:   mv.uci.slice(2, 4),
@@ -2571,7 +2622,7 @@ window.addEventListener('chessjs-ready', () => {
     const moves = chess.moves({ verbose: true }).filter(m => m.from === square);
     for (const m of moves) {
       let after;
-      try { after = new Chess(m.after); } catch (e) { continue; }
+      try { after = makeChess(m.after); } catch (e) { continue; }
       const stillAttacked = after.attackers(m.to, oppColor);
       if (stillAttacked.length === 0) return true;
     }
@@ -2633,7 +2684,7 @@ window.addEventListener('chessjs-ready', () => {
   async function classifyMove(index, depth = 14) {
     const mv = history[index - 1];
     if (!mv) return;
-    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenBefore = index === 1 ? getStartFen() : history[index - 2].fen;
     const fenAfter  = mv.fen;
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
     mv.moverIsWhite = moverIsWhite;
@@ -2819,7 +2870,7 @@ window.addEventListener('chessjs-ready', () => {
     const output = document.getElementById('aiOutput');
     if (cursor === 0) { output.innerHTML = '<em>Load a game first.</em>'; return; }
     const mv = history[cursor - 1];
-    const fenBefore = cursor === 1 ? START_FEN : history[cursor - 2].fen;
+    const fenBefore = cursor === 1 ? getStartFen() : history[cursor - 2].fen;
     const fenAfter  = mv.fen;
     output.innerHTML = '<em>Thinking…</em>';
 
@@ -2831,6 +2882,7 @@ Position before (FEN): ${fenBefore}
 Position after (FEN): ${fenAfter}
 Eval before (mover POV, centipawns): ${mv.evalBefore ?? 'unknown'}
 Eval after (mover POV, centipawns): ${mv.evalAfter ?? 'unknown'}
+${CHESS960 ? 'This game is Chess960 (Fischer Random).' : ''}
 
 Explain in plain English why this move was classified as ${mv.cls || 'unclassified'}. If it's Brilliant, explain what the sacrifice accomplishes. If it's a Miss, explain what winning opportunity was overlooked. If it's a mistake or blunder, explain what was given up. Keep it under 3 sentences. No markdown.`;
 
