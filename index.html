@@ -997,6 +997,38 @@
       stroke-opacity: 0.9;
     }
 
+    let game = new Chess();
+    let history = [];
+    let cursor = 0;
+
+    let clickSelected = null;
+    let clickLegalTargets = [];
+    
+    /* Click-to-move highlights */
+    #board .selected-square {
+      box-shadow: inset 0 0 0 3px var(--primary) !important;
+    }
+    #board .legal-target {
+      position: relative;
+    }
+    #board .legal-target::after {
+      content: "";
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 22%; height: 22%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: rgba(78,222,163,0.35);
+      pointer-events: none;
+    }
+    #board .legal-target.occupied::after {
+      width: 88%; height: 88%;
+      background: none;
+      border: 4px solid rgba(78,222,163,0.5);
+      border-radius: 50%;
+      box-sizing: border-box;
+    }
+
     @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { border-left: 0; border-top: 1px solid var(--line); padding: 20px; }
@@ -1279,7 +1311,12 @@ window.addEventListener('chessjs-ready', () => {
     pieceTheme: 'icons/{piece}.png',
     dropOffBoard: 'snapback',
     onDrop: onDrop,
-    onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); renderArrow(); }
+    onSnapEnd: () => {
+      clearClickSelection();
+      board.position(game.fen());
+      renderBoardOverlay();
+      renderArrow();
+    }
   });
 
   let game = new Chess();
@@ -2209,6 +2246,7 @@ window.addEventListener('chessjs-ready', () => {
   function gotoPly(n) {
     n = Math.max(0, Math.min(n, history.length));
     game = rebuildGameToPly(n);
+    clearClickSelection();
     cursor = n;
     renderAll();
   }
@@ -3068,6 +3106,127 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
 
   renderPlayerStrips({});
   renderAll({ skipAnimation: true });
+  attachClickHandlers();
+
+ // ---------- Click-to-move ----------
+  // Attach a click handler to every square on the board. This works
+  // alongside chessboard.js's drag-and-drop — clicking and dragging are
+  // two independent input paths.
+  function attachClickHandlers() {
+    // chessboard.js re-renders the board on every position() call, so we
+    // must re-attach handlers each time. Use a delegate on the board
+    // container to avoid re-querying constantly.
+    const boardWrap = document.querySelector('.board-wrap');
+    if (!boardWrap || boardWrap.dataset.clickBound === '1') return;
+    boardWrap.dataset.clickBound = '1';
+
+    boardWrap.addEventListener('click', (evt) => {
+      // Find the closest ancestor with a data-square attribute
+      const sqEl = evt.target.closest('[data-square]');
+      if (!sqEl) return;
+      const square = sqEl.dataset.square;
+      handleSquareClick(square);
+    });
+  }
+
+  function handleSquareClick(square) {
+    // If a piece is already selected, try to move it to `square`.
+    if (clickSelected) {
+      // Clicking the same square again deselects.
+      if (square === clickSelected) {
+        clearClickSelection();
+        return;
+      }
+
+      // Try the move. chess.js throws if illegal in 1.0.0.
+      try {
+        const move = game.move({ from: clickSelected, to: square, promotion: 'q' });
+
+        // Move succeeded — commit it to history the same way onDrop does.
+        history = history.slice(0, cursor);
+        const index = history.length + 1;
+
+        history.push({
+          san: move.san, fen: game.fen(),
+          uci: move.from + move.to + (move.promotion || ''),
+          cls: null, cpLoss: null, winDrop: null,
+          evalBefore: null, evalAfter: null,
+          evalBeforeWhite: null, evalAfterWhite: null,
+          moverIsWhite: move.color === 'w',
+          pending: true
+        });
+        cursor = history.length;
+
+        clearClickSelection();
+        renderAll();
+        classifySingleMove(index);
+        return;
+      } catch (e) {
+        // Not a legal move. Either the user clicked another of their own
+        // pieces (reselect) or an empty square (deselect).
+        const piece = game.get(square);
+        if (piece && piece.color === game.turn()) {
+          // Reselect the new piece
+          selectClickSquare(square);
+        } else {
+          // Nothing to do — deselect
+          clearClickSelection();
+        }
+        return;
+      }
+    }
+
+    // Nothing selected yet. Try to select the clicked square.
+    const piece = game.get(square);
+    if (!piece) return;                     // empty square, nothing to do
+    if (piece.color !== game.turn()) return; // not your piece
+
+    selectClickSquare(square);
+  }
+
+  function selectClickSquare(square) {
+    clickSelected = square;
+
+    // Ask chess.js where this piece can legally move.
+    const moves = game.moves({ square: square, verbose: true });
+    clickLegalTargets = moves.map(m => m.to);
+
+    // Paint the highlight
+    renderClickHighlights();
+  }
+
+  function clearClickSelection() {
+    clickSelected = null;
+    clickLegalTargets = [];
+    renderClickHighlights();
+  }
+
+  function renderClickHighlights() {
+    // Clear any existing highlights
+    document.querySelectorAll('#board .selected-square').forEach(el => {
+      el.classList.remove('selected-square');
+    });
+    document.querySelectorAll('#board .legal-target').forEach(el => {
+      el.classList.remove('legal-target', 'occupied');
+    });
+
+    if (!clickSelected) return;
+
+    // Selected square outline
+    const selEl = document.querySelector('#board [data-square="' + clickSelected + '"]');
+    if (selEl) selEl.classList.add('selected-square');
+
+    // Legal-target dots
+    for (const target of clickLegalTargets) {
+      const el = document.querySelector('#board [data-square="' + target + '"]');
+      if (!el) continue;
+      el.classList.add('legal-target');
+      // If the target has a piece on it (a capture), draw a ring instead.
+      const tgtPiece = game.get(target);
+      if (tgtPiece) el.classList.add('occupied');
+    }
+  }
+  
   initStockfish();
 
   window.getGame = () => game;
