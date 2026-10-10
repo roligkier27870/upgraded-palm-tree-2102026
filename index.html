@@ -612,6 +612,11 @@
       background-position: center;
       flex-shrink: 0;
     }
+    .move-cell .badge.pending {
+      background: var(--surface-highest);
+      border-radius: 50%;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
 
     .present-move {
       display: flex;
@@ -653,6 +658,7 @@
     }
     .hero-badge:hover { transform: scale(1.05); }
     .hero-badge-empty { background: var(--surface-highest); color: var(--outline); font-size: 20px; }
+    .hero-badge.pending { animation: pulse 1.2s ease-in-out infinite; }
 
     .hero-badge.cls-brilliant  { background-color: #26c2a3; }
     .hero-badge.cls-great      { background-color: #749bbf; }
@@ -952,9 +958,8 @@
     .dot-blunder    { background: var(--cls-blunder); }
     .dot-forced     { background: var(--cls-forced); }
 
-    /* ---------- Eval graph ---------- */
     #eval-graph-card {
-      display: none;  /* hidden until analysis runs */
+      display: none;
     }
     #eval-graph-card.show { display: block; }
 
@@ -973,12 +978,6 @@
       display: block;
       cursor: pointer;
     }
-    #eval-graph-svg .bg-black {
-      fill: #0a0e16;
-    }
-    #eval-graph-svg .bg-white {
-      fill: #f5f6f8;
-    }
     #eval-graph-svg .midline {
       stroke: rgba(78,222,163,0.25);
       stroke-width: 1;
@@ -996,10 +995,6 @@
       stroke: var(--primary);
       stroke-width: 2;
       stroke-opacity: 0.9;
-    }
-    #eval-graph-svg .cursor-halo {
-      fill: var(--primary);
-      opacity: 0.35;
     }
 
     @media (max-width: 1100px) {
@@ -1257,6 +1252,74 @@
 <script>
 window.addEventListener('chessjs-ready', () => {
 
+    // ---------- Opening book ----------
+  let OPENING_BOOK = {};
+  let BOOK_READY = false;
+
+  async function loadOpeningBook() {
+    const volumes = ['a', 'b', 'c', 'd', 'e'];
+    try {
+      let allText = '';
+      for (const v of volumes) {
+        try {
+          const r = await fetch('data/' + v + '.tsv');
+          if (r.ok) allText += await r.text() + '\n';
+        } catch (e) {
+          console.warn('Missing volume', v);
+        }
+      }
+      const texts = [allText];
+
+      let total = 0;
+      let parsed = 0;
+      let failed = 0;
+
+      for (const text of texts) {
+        const lines = text.split('\n');
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          const parts = line.split('\t');
+          if (parts.length < 3) continue;
+
+          const eco  = parts[0].trim();
+          const name = parts[1].trim();
+          const pgn  = parts[2].trim();
+          if (!pgn) continue;
+
+          // Tokenize: split on whitespace, drop move numbers like "1." and "1..."
+          const tokens = pgn.split(/\s+/).filter(t => !/^\d+\.+$/.test(t));
+
+          const chess = new Chess();
+          let ok = true;
+          for (const san of tokens) {
+            try {
+              const m = chess.move(san);
+              if (!m) { ok = false; break; }
+            } catch (e) { ok = false; break; }
+          }
+          if (!ok) { failed++; continue; }
+          parsed++;
+
+          const fenKey = chess.fen().split(' ').slice(0, 4).join(' ');
+
+          if (!OPENING_BOOK[fenKey]) {
+            OPENING_BOOK[fenKey] = { eco, name };
+            total++;
+          }
+        }
+      }
+
+      BOOK_READY = true;
+      console.log('Opening book loaded:', total, 'positions (parsed', parsed, 'lines,', failed, 'failed)');
+    } catch (err) {
+      console.error('Failed to load opening book:', err);
+    }
+  }
+
+  loadOpeningBook();
+
   const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
   const PROXY_URL = 'https://chess-analyzer-proxy.ju4nit3r78.workers.dev';
@@ -1278,15 +1341,6 @@ window.addEventListener('chessjs-ready', () => {
     blunder: 'Blunder'
   };
 
-  const board = Chessboard('board', {
-    draggable: true,
-    position: 'start',
-    pieceTheme: 'icons/{piece}.png',
-    dropOffBoard: 'snapback',
-    onDrop: onDrop,
-    onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); renderArrow(); }
-  });
-
   let game = new Chess();
   let history = [];
   let cursor = 0;
@@ -1294,22 +1348,155 @@ window.addEventListener('chessjs-ready', () => {
   let currentPgnHeaders = {};
 
   let previousFen = game.fen();
+  let skipNextAnimation = false;
 
-  function onDrop(source, target) {
+  const board = Chessboard('board', {
+    draggable: true,
+    position: 'start',
+    pieceTheme: 'icons/{piece}.png',
+    dropOffBoard: 'snapback',
+    onDrop: onDrop,
+    onSnapEnd: () => {
+      skipNextAnimation = true;
+      previousFen = game.fen();
+      board.position(game.fen());
+      renderBoardOverlay();
+      renderArrow();
+    }
+  });
+
+  // ------------------------------------------------------------
+  // Live-move classification
+  // ------------------------------------------------------------
+  async function onDrop(source, target) {
     try {
       const move = game.move({ from: source, to: target, promotion: 'q' });
+
       history = history.slice(0, cursor);
+      const index = history.length + 1;
+
       history.push({
         san: move.san, fen: game.fen(),
         uci: move.from + move.to + (move.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
         evalBefore: null, evalAfter: null,
-        moverIsWhite: null
+        evalBeforeWhite: null, evalAfterWhite: null,
+        moverIsWhite: null,
+        pending: true
       });
       cursor = history.length;
+
       renderAll();
-    } catch (e) { return 'snapback'; }
+      classifySingleMove(index);
+    } catch (e) {
+      return 'snapback';
+    }
   }
+
+  async function classifySingleMove(index) {
+    if (!sfReady || index < 1 || index > history.length) return;
+    const mv = history[index - 1];
+    if (!mv) return;
+
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
+    const fenAfter = mv.fen;
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    mv.moverIsWhite = moverIsWhite;
+
+    let preCpWhite;
+    if (index === 1) {
+      const preEval = await requestEval(fenBefore, 12, null, 1);
+      preCpWhite = preEval ? preEval.cpWhite : 0;
+    } else {
+      const prev = history[index - 2];
+      if (prev.evalAfterWhite !== null && prev.evalAfterWhite !== undefined) {
+        preCpWhite = prev.evalAfterWhite;
+      } else {
+        const preEval = await requestEval(fenBefore, 12, null, 1);
+        preCpWhite = preEval ? preEval.cpWhite : 0;
+      }
+    }
+
+    const post = await requestEval(fenAfter, 14, null, 1);
+    if (!post || post.cpWhite === null) {
+      mv.pending = false;
+      renderAll();
+      return;
+    }
+
+    const postCpWhite = post.cpWhite;
+    const preCpMover  = moverIsWhite ?  preCpWhite : -preCpWhite;
+    const postCpMover = moverIsWhite ? postCpWhite : -postCpWhite;
+
+    mv.evalBefore = preCpMover;
+    mv.evalAfter  = postCpMover;
+    mv.evalBeforeWhite = preCpWhite;
+    mv.evalAfterWhite  = postCpWhite;
+
+    const clamp = v => Math.max(-1000, Math.min(1000, v));
+    const preWin  = cpToWinProb(clamp(preCpMover));
+    const postWin = cpToWinProb(clamp(postCpMover));
+    const winDrop = Math.max(0, preWin - postWin);
+    mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
+    mv.winDrop = winDrop;
+
+    const playedMatchesBest = post.bestUci && post.bestUci !== '(none)' &&
+      mv.uci.startsWith(post.bestUci.slice(0, 4)) &&
+      (mv.uci.length === 4 || mv.uci[4] === post.bestUci[4]);
+
+    if (isForced(index)) { mv.cls = 'forced'; mv.pending = false; renderAll(); return; }
+    if (isTheory(index, mv.san)) { mv.cls = 'theory'; mv.pending = false; renderAll(); return; }
+
+    const brilliant = await isBrilliantLive(index, fenBefore, fenAfter, preCpMover);
+    if (brilliant) { mv.cls = 'brilliant'; mv.pending = false; renderAll(); return; }
+
+    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) { mv.cls = 'miss'; mv.pending = false; renderAll(); return; }
+
+    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
+    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
+    if (bothWinning || bothLosing) {
+      mv.cls = winDrop <= 0.005 ? 'best' : 'good';
+      mv.pending = false;
+      renderAll();
+      return;
+    }
+
+    if (playedMatchesBest) {
+      const great = await isOnlyGoodMove(fenBefore, 14);
+      mv.cls = great ? 'great' : 'best';
+      mv.pending = false;
+      renderAll();
+      return;
+    }
+
+    mv.cls = classifyWinDrop(winDrop);
+    mv.pending = false;
+    renderAll();
+  }
+
+  async function isBrilliantLive(index, fenBefore, fenAfter, preCpMover) {
+    if (!isSacrifice(index)) return false;
+    const post = await requestEval(fenAfter, 16, null, 2);
+    if (!post || post.cpWhite === null) return false;
+    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
+    const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
+    if (postCpMover < 0) return false;
+    if (post.topLines && post.topLines.length > 0) {
+      const sign = moverIsWhite ? -1 : 1;
+      for (const line of post.topLines) {
+        let cpForOpponent;
+        if (line.mate !== null && line.mate !== undefined) {
+          cpForOpponent = (line.mate > 0 ? 1 : -1) * (10000 - Math.abs(line.mate) * 10);
+        } else if (line.score !== null && line.score !== undefined) {
+          cpForOpponent = line.score;
+        } else { continue; }
+        if (sign * cpForOpponent < 0) return false;
+      }
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------
 
   function renderBoardOverlay() {
     const overlay = document.getElementById('board-overlay');
@@ -1317,7 +1504,7 @@ window.addEventListener('chessjs-ready', () => {
     overlay.innerHTML = '';
     if (cursor === 0) return;
     const mv = history[cursor - 1];
-    if (!mv || !mv.cls) return;
+    if (!mv) return;
 
     const dest = mv.uci.slice(2, 4);
     const fileIdx = dest.charCodeAt(0) - 'a'.charCodeAt(0);
@@ -1328,11 +1515,18 @@ window.addEventListener('chessjs-ready', () => {
     const badgeSize = 26;
 
     const badge = document.createElement('div');
-    badge.className = 'sq-badge cls-' + mv.cls;
+    badge.className = 'sq-badge' + (mv.cls ? ' cls-' + mv.cls : '');
+    if (!mv.cls && mv.pending) {
+      badge.className = 'sq-badge';
+      badge.style.background = 'var(--surface-highest)';
+      badge.style.borderRadius = '50%';
+      badge.style.width = '20px';
+      badge.style.height = '20px';
+    }
     badge.style.left = (fileIdx * sq + sq - badgeSize) + 'px';
     badge.style.top  = (rankIdx * sq) + 'px';
-    badge.title = mv.cls;
-    overlay.appendChild(badge);
+    badge.title = mv.cls || (mv.pending ? 'Analyzing…' : '');
+    if (mv.cls || mv.pending) overlay.appendChild(badge);
   }
 
   function renderArrow() {
@@ -1360,8 +1554,8 @@ window.addEventListener('chessjs-ready', () => {
 
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
-      <marker id="arrowhead" markerWidth="6" markerHeight="6" orient="auto" refX="3.2" refY="3">
-        <polygon points="0 0, 6 3, 0 6" fill="#4edea3"></polygon>
+      <marker id="arrowhead" markerWidth="4" markerHeight="4" orient="auto" refX="2.4" refY="2">
+        <polygon points="0 0, 4 2, 0 4" fill="#4edea3"></polygon>
       </marker>`;
     svg.appendChild(defs);
 
@@ -1371,21 +1565,21 @@ window.addEventListener('chessjs-ready', () => {
     line.setAttribute('x2', x2);
     line.setAttribute('y2', y2);
     line.setAttribute('stroke', '#4edea3');
-    line.setAttribute('stroke-width', '18');
+    line.setAttribute('stroke-width', '10');
     line.setAttribute('stroke-linecap', 'round');
-    line.setAttribute('stroke-opacity', '0.9');
+    line.setAttribute('stroke-opacity', '0.85');
     line.setAttribute('marker-end', 'url(#arrowhead)');
     svg.appendChild(line);
 
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', x2);
     circle.setAttribute('cy', y2);
-    circle.setAttribute('r', '34');
+    circle.setAttribute('r', '20');
     circle.setAttribute('fill', 'none');
     circle.setAttribute('stroke', '#4edea3');
-    circle.setAttribute('stroke-width', '3');
-    circle.setAttribute('stroke-dasharray', '6,4');
-    circle.setAttribute('opacity', '0.8');
+    circle.setAttribute('stroke-width', '2');
+    circle.setAttribute('stroke-dasharray', '5,4');
+    circle.setAttribute('opacity', '0.75');
     svg.appendChild(circle);
   }
 
@@ -1560,7 +1754,8 @@ window.addEventListener('chessjs-ready', () => {
   function renderBoard(options) {
     options = options || {};
     const newFen = game.fen();
-    const skipAnimation = !!options.skipAnimation;
+    const skipAnimation = !!options.skipAnimation || skipNextAnimation;
+    skipNextAnimation = false;
 
     if (skipAnimation) {
       previousFen = newFen;
@@ -1653,17 +1848,23 @@ window.addEventListener('chessjs-ready', () => {
     if (game.isCheckmate()) msg = 'Checkmate — ' + (game.turn() === 'w' ? 'Black' : 'White') + ' wins';
     else if (game.isDraw()) msg = 'Draw';
     else if (game.isCheck()) msg = turn + ' is in check';
+
+    // Opening name from the book, if we have one
+    const op = getOpeningName(game.fen());
+    if (op) msg += '  ·  ' + op.eco + ' ' + op.name;
+
     document.getElementById('status').textContent = msg;
     document.getElementById('fenInline').textContent = game.fen();
     document.getElementById('stripWhite').classList.toggle('active', game.turn() === 'w');
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
-  function badgeFor(cls) {
-    if (!cls) return '';
-    return `<span class="badge cls-${cls}"></span>`;
+  function badgeFor(cls, pending) {
+    if (cls) return `<span class="badge cls-${cls}"></span>`;
+    if (pending) return `<span class="badge pending"></span>`;
+    return '';
   }
-
+  
   function renderMoves() {
     const el = document.getElementById('moveList');
     if (history.length === 0) {
@@ -1683,8 +1884,8 @@ window.addEventListener('chessjs-ready', () => {
       const bIdx = i + 2;
       html += `<div class="move-row">
         <div class="move-no">${num}.</div>
-        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls)}${white.san}</div>
-        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls) + black.san : ''}</div>
+        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls, white.pending)}${white.san}</div>
+        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls, black.pending) + black.san : ''}</div>
       </div>`;
     }
     el.innerHTML = html;
@@ -1723,6 +1924,10 @@ window.addEventListener('chessjs-ready', () => {
     if (mv.cls) {
       heroBadge.classList.add('cls-' + mv.cls);
       heroBadge.style.backgroundImage = `url('icons/${capitalize(mv.cls)}.png')`;
+    } else if (mv.pending) {
+      heroBadge.classList.add('pending');
+      heroBadge.textContent = '…';
+      heroBadge.style.backgroundImage = '';
     } else {
       heroBadge.classList.add('hero-badge-empty');
       heroBadge.textContent = '·';
@@ -1730,7 +1935,7 @@ window.addEventListener('chessjs-ready', () => {
     }
 
     plyPill.textContent = `Ply ${cursor} / ${history.length}`;
-    clsPill.textContent = mv.cls ? capitalize(mv.cls) : 'Unclassified';
+    clsPill.textContent = mv.cls ? capitalize(mv.cls) : (mv.pending ? 'Analyzing…' : 'Unclassified');
   }
 
   function capitalize(s) {
@@ -1742,22 +1947,15 @@ window.addEventListener('chessjs-ready', () => {
     ['next','last'].forEach(id => document.getElementById(id).disabled = cursor >= history.length);
     document.getElementById('heroPrev').disabled = cursor === 0;
     document.getElementById('heroNext').disabled = cursor >= history.length;
-    document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
+    document.getElementById('analyzeAllBtn').disabled =
+      !sfReady || !BOOK_READY || history.length === 0 || analyzingAll;
   }
 
-  // ============================================================
-  // Eval graph
-  // ============================================================
-  // Renders a lichess-style "mountain" chart: white area fills above the
-  // midline where White is winning, black area fills below where Black is
-  // winning. Markers show blunders/mistakes/brilliants. A vertical line
-  // shows the current cursor position.
   function renderEvalGraph() {
     const card = document.getElementById('eval-graph-card');
     const svg = document.getElementById('eval-graph-svg');
     if (!card || !svg) return;
 
-    // Only show once the game has been analyzed
     const hasData = history.length > 0 &&
       history.some(m => m.evalAfterWhite !== null && m.evalAfterWhite !== undefined);
     if (!hasData) {
@@ -1772,7 +1970,6 @@ window.addEventListener('chessjs-ready', () => {
     const H = 120;
     const MID = H / 2;
 
-    // One point per ply using White-POV evals (no sign flipping).
     const points = [{ ply: 0, cp: 0 }];
     for (let i = 0; i < history.length; i++) {
       const mv = history[i];
@@ -1797,7 +1994,7 @@ window.addEventListener('chessjs-ready', () => {
 
     const boundary = points.map(p => ({ x: plyToX(p.ply), y: cpToY(p.cp) }));
 
-    // ---- WHITE region: fills from the bottom edge up to the curve ----
+    // WHITE region: fill from bottom edge up to curve
     const whitePts = [];
     whitePts.push(`${W},${H}`);
     whitePts.push(`0,${H}`);
@@ -1809,7 +2006,7 @@ window.addEventListener('chessjs-ready', () => {
     whitePoly.setAttribute('fill', '#f5f6f8');
     svg.appendChild(whitePoly);
 
-    // ---- BLACK region: fills from the top edge down to the curve ----
+    // BLACK region: fill from top edge down to curve
     const blackPts = [];
     blackPts.push(`0,0`);
     blackPts.push(`${W},0`);
@@ -1821,7 +2018,6 @@ window.addEventListener('chessjs-ready', () => {
     blackPoly.setAttribute('fill', '#0a0e16');
     svg.appendChild(blackPoly);
 
-    // ---- Midline ----
     const mid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     mid.setAttribute('class', 'midline');
     mid.setAttribute('x1', 0);
@@ -1830,7 +2026,6 @@ window.addEventListener('chessjs-ready', () => {
     mid.setAttribute('y2', MID);
     svg.appendChild(mid);
 
-    // ---- Thin green stroke along the curve ----
     const pathD = 'M ' + boundary.map(p => `${p.x} ${p.y}`).join(' L ');
     const curve = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     curve.setAttribute('d', pathD);
@@ -1839,7 +2034,6 @@ window.addEventListener('chessjs-ready', () => {
     curve.setAttribute('stroke-width', '1');
     svg.appendChild(curve);
 
-    // ---- Markers for notable moves ----
     const markerClasses = {
       brilliant: 'marker-brilliant',
       blunder: 'marker-blunder',
@@ -1862,7 +2056,6 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(dot);
     }
 
-    // ---- Cursor line at current ply ----
     if (cursor > 0 && cursor <= history.length) {
       const x = plyToX(cursor);
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -1874,7 +2067,6 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(line);
     }
 
-    // ---- Click handler ----
     svg.onclick = (evt) => {
       const rect = svg.getBoundingClientRect();
       const relX = evt.clientX - rect.left;
@@ -1952,7 +2144,9 @@ window.addEventListener('chessjs-ready', () => {
         uci: m.from + m.to + (m.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
         evalBefore: null, evalAfter: null,
-        moverIsWhite: null
+        evalBeforeWhite: null, evalAfterWhite: null,
+        moverIsWhite: null,
+        pending: false
       });
     }
     history = newHistory;
@@ -2246,30 +2440,28 @@ window.addEventListener('chessjs-ready', () => {
     return { w, b };
   }
 
+    // ---------- Theory lookup against the loaded opening book ----------
   function isTheory(moveIndex, san) {
-    const BOOK = [
-      ['e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7'],
-      ['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6'],
-      ['d4','d5','c4','e6','Nc3','Nf6','Bg5','Be7'],
-      ['e4','e5','Nf3','Nc6','Bc4','Bc5','c3','Nf6'],
-      ['d4','Nf6','c4','g6','Nc3','Bg7','e4','d6'],
-      ['e4','e5','Nf3','Nc6','d4','exd4','Nxd4','Nf6'],
-      ['e4','c6','d4','d5','Nc3','dxe4','Nxe4','Bf5'],
-      ['e4','e6','d4','d5','Nc3','Nf6','e5','Nfd7'],
-      ['d4','d5','c4','c6','Nf3','Nf6','Nc3','dxc4'],
-      ['e4','d5','exd5','Qxd5','Nc3','Qa5','d4','Nf6'],
-      ['c4','e5','Nc3','Nf6','Nf3','Nc6'],
-      ['Nf3','d5','g3','Nf6','Bg2','e6']
-    ];
-    for (const line of BOOK) {
-      if (moveIndex > line.length) continue;
-      let matches = true;
-      for (let i = 0; i < moveIndex - 1; i++) {
-        if (history[i] && history[i].san !== line[i]) { matches = false; break; }
-      }
-      if (matches && line[moveIndex - 1] === san) return true;
-    }
-    return false;
+    if (!BOOK_READY) return false;
+
+    // Position BEFORE the move (EPD form to match the book).
+    const fenBefore = moveIndex === 1 ? START_FEN : history[moveIndex - 2].fen;
+    const fenKey = fenBefore.split(' ').slice(0, 4).join(' ');
+
+    // Position AFTER the move (EPD form) — we need this to confirm the
+    // played move is actually one the book continues with.
+    const fenAfter = history[moveIndex - 1].fen;
+    const fenAfterKey = fenAfter.split(' ').slice(0, 4).join(' ');
+
+    // If either position is in the book, the played move is theory.
+    return !!(OPENING_BOOK[fenKey] || OPENING_BOOK[fenAfterKey]);
+  }
+
+  // Optional: return the opening name for the current position, or null.
+  function getOpeningName(fen) {
+    if (!BOOK_READY) return null;
+    const key = fen.split(' ').slice(0, 4).join(' ');
+    return OPENING_BOOK[key] || null;
   }
 
   function isForced(index) {
