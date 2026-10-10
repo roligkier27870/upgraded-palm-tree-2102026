@@ -612,11 +612,6 @@
       background-position: center;
       flex-shrink: 0;
     }
-    .move-cell .badge.pending {
-      background: var(--surface-highest);
-      border-radius: 50%;
-      animation: pulse 1.2s ease-in-out infinite;
-    }
 
     .present-move {
       display: flex;
@@ -658,7 +653,6 @@
     }
     .hero-badge:hover { transform: scale(1.05); }
     .hero-badge-empty { background: var(--surface-highest); color: var(--outline); font-size: 20px; }
-    .hero-badge.pending { animation: pulse 1.2s ease-in-out infinite; }
 
     .hero-badge.cls-brilliant  { background-color: #26c2a3; }
     .hero-badge.cls-great      { background-color: #749bbf; }
@@ -958,8 +952,9 @@
     .dot-blunder    { background: var(--cls-blunder); }
     .dot-forced     { background: var(--cls-forced); }
 
+    /* ---------- Eval graph ---------- */
     #eval-graph-card {
-      display: none;
+      display: none;  /* hidden until analysis runs */
     }
     #eval-graph-card.show { display: block; }
 
@@ -977,6 +972,12 @@
       height: 100%;
       display: block;
       cursor: pointer;
+    }
+    #eval-graph-svg .bg-black {
+      fill: #0a0e16;
+    }
+    #eval-graph-svg .bg-white {
+      fill: #f5f6f8;
     }
     #eval-graph-svg .midline {
       stroke: rgba(78,222,163,0.25);
@@ -996,37 +997,9 @@
       stroke-width: 2;
       stroke-opacity: 0.9;
     }
-
-    let game = new Chess();
-    let history = [];
-    let cursor = 0;
-
-    let clickSelected = null;
-    let clickLegalTargets = [];
-    
-    /* Click-to-move highlights */
-    #board .selected-square {
-      box-shadow: inset 0 0 0 3px var(--primary) !important;
-    }
-    #board .legal-target {
-      position: relative;
-    }
-    #board .legal-target::after {
-      content: "";
-      position: absolute;
-      top: 50%; left: 50%;
-      width: 22%; height: 22%;
-      transform: translate(-50%, -50%);
-      border-radius: 50%;
-      background: rgba(78,222,163,0.35);
-      pointer-events: none;
-    }
-    #board .legal-target.occupied::after {
-      width: 88%; height: 88%;
-      background: none;
-      border: 4px solid rgba(78,222,163,0.5);
-      border-radius: 50%;
-      box-sizing: border-box;
+    #eval-graph-svg .cursor-halo {
+      fill: var(--primary);
+      opacity: 0.35;
     }
 
     @media (max-width: 1100px) {
@@ -1311,12 +1284,7 @@ window.addEventListener('chessjs-ready', () => {
     pieceTheme: 'icons/{piece}.png',
     dropOffBoard: 'snapback',
     onDrop: onDrop,
-    onSnapEnd: () => {
-      clearClickSelection();
-      board.position(game.fen());
-      renderBoardOverlay();
-      renderArrow();
-    }
+    onSnapEnd: () => { board.position(game.fen()); renderBoardOverlay(); renderArrow(); }
   });
 
   let game = new Chess();
@@ -1325,281 +1293,23 @@ window.addEventListener('chessjs-ready', () => {
   let movesViewMode = 'present';
   let currentPgnHeaders = {};
 
-  // The starting FEN for the current game. For standard chess this stays
-  // START_FEN. For Chess960 it's whatever the PGN's FEN header says.
-  // Used as the "before" position for move index 1.
-  let startingFen = START_FEN;
-
-  // When true, the current game is a Chess960 game. Affects castling
-  // resolution in `onDrop` (drag-to-move) since chess.js 1.0.0 doesn't
-  // handle Chess960 castling on its own.
-  let isVariant960 = false;
-
   let previousFen = game.fen();
 
-  // ------------------------------------------------------------
-  // Chess960 helpers
-  // ------------------------------------------------------------
-  function isChess960Headers(headers) {
-    if (!headers) return false;
-    return headers.Variant === 'Chess960' || headers.variant === 'chess960';
-  }
-
-  // Find the actual king and castling-rook squares for a Chess960 castle.
-  // `moverColor` is 'w' or 'b'; `side` is 'k' (kingside) or 'q' (queenside).
-  // Returns { king: {from, to}, rook: {from, to} } or null.
-  function resolveChess960Castle(chess, side, moverColor) {
-    const boardArr = chess.board();
-    const rankIdx = moverColor === 'w' ? 7 : 0;
-    const rank = moverColor === 'w' ? 1 : 8;
-    const files = ['a','b','c','d','e','f','g','h'];
-
-    let kingFile = -1;
-    for (let f = 0; f < 8; f++) {
-      const sq = boardArr[rankIdx][f];
-      if (sq && sq.type === 'k' && sq.color === moverColor) { kingFile = f; break; }
-    }
-    if (kingFile === -1) return null;
-
-    let rookFile = -1;
-    if (side === 'k') {
-      for (let f = kingFile + 1; f < 8; f++) {
-        const sq = boardArr[rankIdx][f];
-        if (sq && sq.type === 'r' && sq.color === moverColor) { rookFile = f; break; }
-      }
-    } else {
-      for (let f = kingFile - 1; f >= 0; f--) {
-        const sq = boardArr[rankIdx][f];
-        if (sq && sq.type === 'r' && sq.color === moverColor) { rookFile = f; break; }
-      }
-    }
-    if (rookFile === -1) return null;
-
-    // Chess960 destinations are ALWAYS the standard castled squares:
-    // kingside: king → g1/g8, rook → f1/f8
-    // queenside: king → c1/c8, rook → d1/d8
-    const kingTo = (side === 'k' ? 'g' : 'c') + rank;
-    const rookTo = (side === 'k' ? 'f' : 'd') + rank;
-
-    return {
-      king: { from: files[kingFile] + rank, to: kingTo },
-      rook: { from: files[rookFile] + rank, to: rookTo }
-    };
-  }
-
-  // Detect whether the user is attempting a castling drag (king two squares
-  // left or right). chessboard.js reports the source/target squares, and
-  // chess.js's move() would fail for a 960 castle. We detect it here by
-  // looking at the piece on `source` and the distance to `target`.
-  function isCastleAttempt(source, target, color) {
-    const piece = game.get(source);
-    if (!piece || piece.type !== 'k' || piece.color !== color) return null;
-    const fromFile = source.charCodeAt(0) - 97;
-    const toFile = target.charCodeAt(0) - 97;
-    const fromRank = source[1];
-    const toRank = target[1];
-    if (fromRank !== toRank) return null;
-    if (Math.abs(toFile - fromFile) === 2) {
-      // Kingside if target file > source file
-      return toFile > fromFile ? 'k' : 'q';
-    }
-    // Also allow dragging the king onto the rook (some UIs do this).
-    const targetPiece = game.get(target);
-    if (targetPiece && targetPiece.type === 'r' && targetPiece.color === color) {
-      return toFile > fromFile ? 'k' : 'q';
-    }
-    return null;
-  }
-
-  // Perform a Chess960 castle on the live `game` object. Returns
-  // { kingMove, rookMove } with SAN strings if successful, or null.
-  function doChess960Castle(side, moverColor) {
-    const squares = resolveChess960Castle(game, side, moverColor);
-    if (!squares) return null;
-    try {
-      const kingMove = game.move({ from: squares.king.from, to: squares.king.to });
-      const rookMove = game.move({ from: squares.rook.from, to: squares.rook.to });
-      // SAN for the castle is O-O / O-O-O
-      const san = side === 'k' ? 'O-O' : 'O-O-O';
-      return { san, kingMove, rookMove };
-    } catch (e) {
-      console.warn('Chess960 castle failed:', e);
-      return null;
-    }
-  }
-
-  // ------------------------------------------------------------
-  // onDrop — handles both standard and Chess960 moves
-  // ------------------------------------------------------------
-  async function onDrop(source, target) {
-    const moverColor = game.turn();
-
-    // First, check for a Chess960 castling attempt
-    if (isVariant960) {
-      const side = isCastleAttempt(source, target, moverColor);
-      if (side) {
-        const castle = doChess960Castle(side, moverColor);
-        if (!castle) return 'snapback';
-
-        // The "kingMove" is the first move applied; its from/to are what
-        // chessboard.js expects to see animated. But the SAN text is
-        // O-O / O-O-O. Also move the rook for animation.
-        history = history.slice(0, cursor);
-        const index = history.length + 1;
-
-        // Store UCI as the king's from/to so the overlay/arrow logic works.
-        // The animation detection uses FEN diff, so it'll pick up both pieces.
-        history.push({
-          san: castle.san,
-          fen: game.fen(),
-          uci: castle.kingMove.from + castle.kingMove.to,
-          castleSide: side,
-          cls: null, cpLoss: null, winDrop: null,
-          evalBefore: null, evalAfter: null,
-          evalBeforeWhite: null, evalAfterWhite: null,
-          moverIsWhite: moverColor === 'w',
-          pending: true
-        });
-        cursor = history.length;
-
-        renderAll();
-        classifySingleMove(index);
-        return;
-      }
-    }
-
-    // Standard move path
+  function onDrop(source, target) {
     try {
       const move = game.move({ from: source, to: target, promotion: 'q' });
-
       history = history.slice(0, cursor);
-      const index = history.length + 1;
-
       history.push({
         san: move.san, fen: game.fen(),
         uci: move.from + move.to + (move.promotion || ''),
         cls: null, cpLoss: null, winDrop: null,
         evalBefore: null, evalAfter: null,
-        evalBeforeWhite: null, evalAfterWhite: null,
-        moverIsWhite: move.color === 'w',
-        pending: true
+        moverIsWhite: null
       });
       cursor = history.length;
-
       renderAll();
-      classifySingleMove(index);
-    } catch (e) {
-      return 'snapback';
-    }
+    } catch (e) { return 'snapback'; }
   }
-
-  // ------------------------------------------------------------
-  // classifySingleMove — same as before
-  // ------------------------------------------------------------
-  async function classifySingleMove(index) {
-    if (!sfReady || index < 1 || index > history.length) return;
-    const mv = history[index - 1];
-    if (!mv) return;
-
-    const fenBefore = index === 1 ? startingFen : history[index - 2].fen;
-    const fenAfter = mv.fen;
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-    mv.moverIsWhite = moverIsWhite;
-
-    let preCpWhite;
-    if (index === 1) {
-      const preEval = await requestEval(fenBefore, 12, null, 1);
-      preCpWhite = preEval ? preEval.cpWhite : 0;
-    } else {
-      const prev = history[index - 2];
-      if (prev.evalAfterWhite !== null && prev.evalAfterWhite !== undefined) {
-        preCpWhite = prev.evalAfterWhite;
-      } else {
-        const preEval = await requestEval(fenBefore, 12, null, 1);
-        preCpWhite = preEval ? preEval.cpWhite : 0;
-      }
-    }
-
-    const post = await requestEval(fenAfter, 14, null, 1);
-    if (!post || post.cpWhite === null) {
-      mv.pending = false;
-      renderAll();
-      return;
-    }
-
-    const postCpWhite = post.cpWhite;
-    const preCpMover  = moverIsWhite ?  preCpWhite : -preCpWhite;
-    const postCpMover = moverIsWhite ? postCpWhite : -postCpWhite;
-
-    mv.evalBefore = preCpMover;
-    mv.evalAfter  = postCpMover;
-    mv.evalBeforeWhite = preCpWhite;
-    mv.evalAfterWhite  = postCpWhite;
-
-    const clamp = v => Math.max(-1000, Math.min(1000, v));
-    const preWin  = cpToWinProb(clamp(preCpMover));
-    const postWin = cpToWinProb(clamp(postCpMover));
-    const winDrop = Math.max(0, preWin - postWin);
-    mv.cpLoss  = Math.max(0, preCpMover - postCpMover);
-    mv.winDrop = winDrop;
-
-    const playedMatchesBest = post.bestUci && post.bestUci !== '(none)' &&
-      mv.uci.startsWith(post.bestUci.slice(0, 4)) &&
-      (mv.uci.length === 4 || mv.uci[4] === post.bestUci[4]);
-
-    if (isForced(index)) { mv.cls = 'forced'; mv.pending = false; renderAll(); return; }
-    if (isTheory(index, mv.san)) { mv.cls = 'theory'; mv.pending = false; renderAll(); return; }
-
-    const brilliant = await isBrilliantLive(index, fenBefore, fenAfter, preCpMover);
-    if (brilliant) { mv.cls = 'brilliant'; mv.pending = false; renderAll(); return; }
-
-    if (isMiss(playedMatchesBest, preCpMover, postCpMover)) { mv.cls = 'miss'; mv.pending = false; renderAll(); return; }
-
-    const bothWinning = preCpMover >= 900 && postCpMover >= 900;
-    const bothLosing  = preCpMover <= -900 && postCpMover <= -900;
-    if (bothWinning || bothLosing) {
-      mv.cls = winDrop <= 0.005 ? 'best' : 'good';
-      mv.pending = false;
-      renderAll();
-      return;
-    }
-
-    if (playedMatchesBest) {
-      const great = await isOnlyGoodMove(fenBefore, 14);
-      mv.cls = great ? 'great' : 'best';
-      mv.pending = false;
-      renderAll();
-      return;
-    }
-
-    mv.cls = classifyWinDrop(winDrop);
-    mv.pending = false;
-    renderAll();
-  }
-
-  async function isBrilliantLive(index, fenBefore, fenAfter, preCpMover) {
-    if (!isSacrifice(index)) return false;
-    const post = await requestEval(fenAfter, 16, null, 2);
-    if (!post || post.cpWhite === null) return false;
-    const moverIsWhite = fenBefore.split(' ')[1] === 'w';
-    const postCpMover  = moverIsWhite ? post.cpWhite : -post.cpWhite;
-    if (postCpMover < 0) return false;
-    if (post.topLines && post.topLines.length > 0) {
-      const sign = moverIsWhite ? -1 : 1;
-      for (const line of post.topLines) {
-        let cpForOpponent;
-        if (line.mate !== null && line.mate !== undefined) {
-          cpForOpponent = (line.mate > 0 ? 1 : -1) * (10000 - Math.abs(line.mate) * 10);
-        } else if (line.score !== null && line.score !== undefined) {
-          cpForOpponent = line.score;
-        } else { continue; }
-        if (sign * cpForOpponent < 0) return false;
-      }
-    }
-    return true;
-  }
-
-  // ------------------------------------------------------------
 
   function renderBoardOverlay() {
     const overlay = document.getElementById('board-overlay');
@@ -1607,7 +1317,7 @@ window.addEventListener('chessjs-ready', () => {
     overlay.innerHTML = '';
     if (cursor === 0) return;
     const mv = history[cursor - 1];
-    if (!mv) return;
+    if (!mv || !mv.cls) return;
 
     const dest = mv.uci.slice(2, 4);
     const fileIdx = dest.charCodeAt(0) - 'a'.charCodeAt(0);
@@ -1618,18 +1328,11 @@ window.addEventListener('chessjs-ready', () => {
     const badgeSize = 26;
 
     const badge = document.createElement('div');
-    badge.className = 'sq-badge' + (mv.cls ? ' cls-' + mv.cls : '');
-    if (!mv.cls && mv.pending) {
-      badge.className = 'sq-badge';
-      badge.style.background = 'var(--surface-highest)';
-      badge.style.borderRadius = '50%';
-      badge.style.width = '20px';
-      badge.style.height = '20px';
-    }
+    badge.className = 'sq-badge cls-' + mv.cls;
     badge.style.left = (fileIdx * sq + sq - badgeSize) + 'px';
     badge.style.top  = (rankIdx * sq) + 'px';
-    badge.title = mv.cls || (mv.pending ? 'Analyzing…' : '');
-    if (mv.cls || mv.pending) overlay.appendChild(badge);
+    badge.title = mv.cls;
+    overlay.appendChild(badge);
   }
 
   function renderArrow() {
@@ -1657,8 +1360,8 @@ window.addEventListener('chessjs-ready', () => {
 
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = `
-      <marker id="arrowhead" markerWidth="4" markerHeight="4" orient="auto" refX="2.4" refY="2">
-        <polygon points="0 0, 4 2, 0 4" fill="#4edea3"></polygon>
+      <marker id="arrowhead" markerWidth="6" markerHeight="6" orient="auto" refX="3.2" refY="3">
+        <polygon points="0 0, 6 3, 0 6" fill="#4edea3"></polygon>
       </marker>`;
     svg.appendChild(defs);
 
@@ -1668,21 +1371,21 @@ window.addEventListener('chessjs-ready', () => {
     line.setAttribute('x2', x2);
     line.setAttribute('y2', y2);
     line.setAttribute('stroke', '#4edea3');
-    line.setAttribute('stroke-width', '10');
+    line.setAttribute('stroke-width', '18');
     line.setAttribute('stroke-linecap', 'round');
-    line.setAttribute('stroke-opacity', '0.85');
+    line.setAttribute('stroke-opacity', '0.9');
     line.setAttribute('marker-end', 'url(#arrowhead)');
     svg.appendChild(line);
 
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', x2);
     circle.setAttribute('cy', y2);
-    circle.setAttribute('r', '20');
+    circle.setAttribute('r', '34');
     circle.setAttribute('fill', 'none');
     circle.setAttribute('stroke', '#4edea3');
-    circle.setAttribute('stroke-width', '2');
-    circle.setAttribute('stroke-dasharray', '5,4');
-    circle.setAttribute('opacity', '0.75');
+    circle.setAttribute('stroke-width', '3');
+    circle.setAttribute('stroke-dasharray', '6,4');
+    circle.setAttribute('opacity', '0.8');
     svg.appendChild(circle);
   }
 
@@ -1751,7 +1454,6 @@ window.addEventListener('chessjs-ready', () => {
       return [{ from: fromSq, to: toSq, piece }];
     }
 
-    // Two pieces moved (castling — standard OR Chess960)
     if (squaresGone.length === 2 && squaresArrived.length === 2) {
       const moves = [];
       const remainingArrived = squaresArrived.slice();
@@ -1957,10 +1659,9 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('stripBlack').classList.toggle('active', game.turn() === 'b');
   }
 
-  function badgeFor(cls, pending) {
-    if (cls) return `<span class="badge cls-${cls}"></span>`;
-    if (pending) return `<span class="badge pending"></span>`;
-    return '';
+  function badgeFor(cls) {
+    if (!cls) return '';
+    return `<span class="badge cls-${cls}"></span>`;
   }
 
   function renderMoves() {
@@ -1982,8 +1683,8 @@ window.addEventListener('chessjs-ready', () => {
       const bIdx = i + 2;
       html += `<div class="move-row">
         <div class="move-no">${num}.</div>
-        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls, white.pending)}${white.san}</div>
-        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls, black.pending) + black.san : ''}</div>
+        <div class="move-cell ${cursor === wIdx ? 'active' : ''}" data-idx="${wIdx}">${badgeFor(white.cls)}${white.san}</div>
+        <div class="move-cell ${cursor === bIdx ? 'active' : ''}" data-idx="${bIdx}">${black ? badgeFor(black.cls) + black.san : ''}</div>
       </div>`;
     }
     el.innerHTML = html;
@@ -2022,10 +1723,6 @@ window.addEventListener('chessjs-ready', () => {
     if (mv.cls) {
       heroBadge.classList.add('cls-' + mv.cls);
       heroBadge.style.backgroundImage = `url('icons/${capitalize(mv.cls)}.png')`;
-    } else if (mv.pending) {
-      heroBadge.classList.add('pending');
-      heroBadge.textContent = '…';
-      heroBadge.style.backgroundImage = '';
     } else {
       heroBadge.classList.add('hero-badge-empty');
       heroBadge.textContent = '·';
@@ -2033,7 +1730,7 @@ window.addEventListener('chessjs-ready', () => {
     }
 
     plyPill.textContent = `Ply ${cursor} / ${history.length}`;
-    clsPill.textContent = mv.cls ? capitalize(mv.cls) : (mv.pending ? 'Analyzing…' : 'Unclassified');
+    clsPill.textContent = mv.cls ? capitalize(mv.cls) : 'Unclassified';
   }
 
   function capitalize(s) {
@@ -2048,11 +1745,19 @@ window.addEventListener('chessjs-ready', () => {
     document.getElementById('analyzeAllBtn').disabled = !sfReady || history.length === 0 || analyzingAll;
   }
 
+  // ============================================================
+  // Eval graph
+  // ============================================================
+  // Renders a lichess-style "mountain" chart: white area fills above the
+  // midline where White is winning, black area fills below where Black is
+  // winning. Markers show blunders/mistakes/brilliants. A vertical line
+  // shows the current cursor position.
   function renderEvalGraph() {
     const card = document.getElementById('eval-graph-card');
     const svg = document.getElementById('eval-graph-svg');
     if (!card || !svg) return;
 
+    // Only show once the game has been analyzed
     const hasData = history.length > 0 &&
       history.some(m => m.evalAfterWhite !== null && m.evalAfterWhite !== undefined);
     if (!hasData) {
@@ -2067,6 +1772,7 @@ window.addEventListener('chessjs-ready', () => {
     const H = 120;
     const MID = H / 2;
 
+    // One point per ply using White-POV evals (no sign flipping).
     const points = [{ ply: 0, cp: 0 }];
     for (let i = 0; i < history.length; i++) {
       const mv = history[i];
@@ -2091,15 +1797,19 @@ window.addEventListener('chessjs-ready', () => {
 
     const boundary = points.map(p => ({ x: plyToX(p.ply), y: cpToY(p.cp) }));
 
+    // ---- WHITE region: fills from the bottom edge up to the curve ----
     const whitePts = [];
     whitePts.push(`${W},${H}`);
     whitePts.push(`0,${H}`);
-    for (const pt of boundary) whitePts.push(`${pt.x},${pt.y}`);
+    for (const pt of boundary) {
+      whitePts.push(`${pt.x},${pt.y}`);
+    }
     const whitePoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     whitePoly.setAttribute('points', whitePts.join(' '));
     whitePoly.setAttribute('fill', '#f5f6f8');
     svg.appendChild(whitePoly);
 
+    // ---- BLACK region: fills from the top edge down to the curve ----
     const blackPts = [];
     blackPts.push(`0,0`);
     blackPts.push(`${W},0`);
@@ -2111,6 +1821,7 @@ window.addEventListener('chessjs-ready', () => {
     blackPoly.setAttribute('fill', '#0a0e16');
     svg.appendChild(blackPoly);
 
+    // ---- Midline ----
     const mid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     mid.setAttribute('class', 'midline');
     mid.setAttribute('x1', 0);
@@ -2119,6 +1830,7 @@ window.addEventListener('chessjs-ready', () => {
     mid.setAttribute('y2', MID);
     svg.appendChild(mid);
 
+    // ---- Thin green stroke along the curve ----
     const pathD = 'M ' + boundary.map(p => `${p.x} ${p.y}`).join(' L ');
     const curve = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     curve.setAttribute('d', pathD);
@@ -2127,6 +1839,7 @@ window.addEventListener('chessjs-ready', () => {
     curve.setAttribute('stroke-width', '1');
     svg.appendChild(curve);
 
+    // ---- Markers for notable moves ----
     const markerClasses = {
       brilliant: 'marker-brilliant',
       blunder: 'marker-blunder',
@@ -2149,6 +1862,7 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(dot);
     }
 
+    // ---- Cursor line at current ply ----
     if (cursor > 0 && cursor <= history.length) {
       const x = plyToX(cursor);
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -2160,6 +1874,7 @@ window.addEventListener('chessjs-ready', () => {
       svg.appendChild(line);
     }
 
+    // ---- Click handler ----
     svg.onclick = (evt) => {
       const rect = svg.getBoundingClientRect();
       const relX = evt.clientX - rect.left;
@@ -2179,74 +1894,12 @@ window.addEventListener('chessjs-ready', () => {
     scheduleAutoAnalyze();
   }
 
-  // Rebuild the game from `startingFen` (Chess960 start or standard start)
-  // by replaying all SAN moves up to `n`. Handles Chess960 castles so the
-  // board state after navigating is correct.
-  function rebuildGameToPly(n) {
-    const g = new Chess();
-    try { g.load(startingFen); } catch (e) { /* noop */ }
-    for (let i = 0; i < n; i++) {
-      const mv = history[i];
-      if (!mv) break;
-      try {
-        if (mv.castleSide) {
-          // Chess960 castle — move king, then rook
-          const side = mv.castleSide;
-          const moverColor = mv.moverIsWhite ? 'w' : 'b';
-          const squares = resolveChess960CastleForGame(g, side, moverColor);
-          if (squares) {
-            g.move({ from: squares.king.from, to: squares.king.to });
-            g.move({ from: squares.rook.from, to: squares.rook.to });
-          }
-        } else {
-          g.move(mv.san);
-        }
-      } catch (e) { break; }
-    }
-    return g;
-  }
-
-  // Same as resolveChess960Castle but takes a game object directly.
-  function resolveChess960CastleForGame(chess, side, moverColor) {
-    const boardArr = chess.board();
-    const rankIdx = moverColor === 'w' ? 7 : 0;
-    const rank = moverColor === 'w' ? 1 : 8;
-    const files = ['a','b','c','d','e','f','g','h'];
-
-    let kingFile = -1;
-    for (let f = 0; f < 8; f++) {
-      const sq = boardArr[rankIdx][f];
-      if (sq && sq.type === 'k' && sq.color === moverColor) { kingFile = f; break; }
-    }
-    if (kingFile === -1) return null;
-
-    let rookFile = -1;
-    if (side === 'k') {
-      for (let f = kingFile + 1; f < 8; f++) {
-        const sq = boardArr[rankIdx][f];
-        if (sq && sq.type === 'r' && sq.color === moverColor) { rookFile = f; break; }
-      }
-    } else {
-      for (let f = kingFile - 1; f >= 0; f--) {
-        const sq = boardArr[rankIdx][f];
-        if (sq && sq.type === 'r' && sq.color === moverColor) { rookFile = f; break; }
-      }
-    }
-    if (rookFile === -1) return null;
-
-    const kingTo = (side === 'k' ? 'g' : 'c') + rank;
-    const rookTo = (side === 'k' ? 'f' : 'd') + rank;
-
-    return {
-      king: { from: files[kingFile] + rank, to: kingTo },
-      rook: { from: files[rookFile] + rank, to: rookTo }
-    };
-  }
-
   function gotoPly(n) {
     n = Math.max(0, Math.min(n, history.length));
-    game = rebuildGameToPly(n);
-    clearClickSelection();
+    game = new Chess();
+    for (let i = 0; i < n; i++) {
+      try { game.move(history[i].san); } catch (e) { break; }
+    }
     cursor = n;
     renderAll();
   }
@@ -2279,113 +1932,34 @@ window.addEventListener('chessjs-ready', () => {
     if (e.key === 'ArrowRight') gotoPly(cursor + 1);
   });
 
-  // ------------------------------------------------------------
-  // PGN loader — Chess960 aware
-  // ------------------------------------------------------------
   document.getElementById('loadPgn').onclick = () => {
     const text = document.getElementById('pgnInput').value.trim();
     if (!text) return;
+    const g = new Chess();
+    try { g.loadPgn(text); }
+    catch (err) { alert('Could not parse PGN: ' + err.message); return; }
 
-    // Extract headers
-    const headerMatches = {};
-    const headerRegex = /\[(\w+)\s+"([^"]*)"\]/g;
-    let hm;
-    while ((hm = headerRegex.exec(text)) !== null) {
-      headerMatches[hm[1]] = hm[2];
-    }
-    currentPgnHeaders = headerMatches;
+    const headers = g.header ? g.header() : {};
+    currentPgnHeaders = headers;
 
-    const chess960 = isChess960Headers(headerMatches);
-    isVariant960 = chess960;
-
-    // Determine starting FEN
-    if ((chess960 || headerMatches.SetUp === '1') && headerMatches.FEN) {
-      startingFen = headerMatches.FEN;
-    } else {
-      startingFen = START_FEN;
-    }
-
-    // Build the replay game from the starting FEN
     const replay = new Chess();
-    try { replay.load(startingFen); }
-    catch (e) { alert('Invalid starting FEN'); return; }
-
-    // Extract SAN tokens from the PGN body
-    let body = text.replace(/\[[^\]]*\]/g, ' ');
-    body = body.replace(/\{[^}]*\}/g, ' ');
-    body = body.replace(/\$\d+/g, ' ');
-    body = body.replace(/\b(1-0|0-1|1\/2-1\/2|\*)\b/g, ' ');
-    body = body.replace(/\d+\.(\.\.)?/g, ' ');
-    const tokens = body.split(/\s+/).filter(t => t.length > 0);
-
-    const sanRegex = /^(?:[NBRQK][a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?[+#]?|[a-h](?:x[a-h])?[1-8](?:=[NBRQ])?[+#]?|O-O(?:-O)?[+#]?)$/;
-
+    const moves = g.history({ verbose: true });
     const newHistory = [];
-    for (const tok of tokens) {
-      if (!sanRegex.test(tok)) continue;
-
-      const moverColor = replay.turn();
-      const moverIsWhite = moverColor === 'w';
-
-      let san = tok;
-
-      if (tok === 'O-O' || tok === 'O-O-O') {
-        const side = tok === 'O-O' ? 'k' : 'q';
-        const squares = resolveChess960CastleForGame(replay, side, moverColor);
-        if (!squares) {
-          console.warn('Could not resolve castle:', tok);
-          break;
-        }
-        try {
-          const kingMove = replay.move({ from: squares.king.from, to: squares.king.to });
-          replay.move({ from: squares.rook.from, to: squares.rook.to });
-          newHistory.push({
-            san: tok,
-            fen: replay.fen(),
-            uci: kingMove.from + kingMove.to,
-            castleSide: side,
-            cls: null, cpLoss: null, winDrop: null,
-            evalBefore: null, evalAfter: null,
-            evalBeforeWhite: null, evalAfterWhite: null,
-            moverIsWhite: moverIsWhite,
-            pending: false
-          });
-          continue;
-        } catch (e) {
-          console.warn('Castle failed:', e);
-          break;
-        }
-      }
-
-      try {
-        const m = replay.move(tok);
-        if (!m) break;
-        newHistory.push({
-          san: m.san,
-          fen: replay.fen(),
-          uci: m.from + m.to + (m.promotion || ''),
-          cls: null, cpLoss: null, winDrop: null,
-          evalBefore: null, evalAfter: null,
-          evalBeforeWhite: null, evalAfterWhite: null,
-          moverIsWhite: moverIsWhite,
-          pending: false
-        });
-      } catch (e) {
-        console.warn('Move failed:', tok, e);
-        break;
-      }
+    for (const m of moves) {
+      try { replay.move(m.san); } catch (e) { break; }
+      newHistory.push({
+        san: m.san, fen: replay.fen(),
+        uci: m.from + m.to + (m.promotion || ''),
+        cls: null, cpLoss: null, winDrop: null,
+        evalBefore: null, evalAfter: null,
+        moverIsWhite: null
+      });
     }
-
-    if (newHistory.length === 0) {
-      alert('No moves could be parsed.');
-      return;
-    }
-
     history = newHistory;
     cursor = history.length;
     game = replay;
     previousFen = replay.fen();
-    renderPlayerStrips(headerMatches);
+    renderPlayerStrips(headers);
     renderAll({ skipAnimation: true });
   };
 
@@ -2394,8 +1968,6 @@ window.addEventListener('chessjs-ready', () => {
     if (!fen) return;
     try { game = new Chess(fen); }
     catch (err) { alert('Invalid FEN'); return; }
-    startingFen = fen;
-    isVariant960 = false;
     history = []; cursor = 0;
     previousFen = game.fen();
     renderPlayerStrips({});
@@ -2404,8 +1976,6 @@ window.addEventListener('chessjs-ready', () => {
 
   document.getElementById('loadStart').onclick = () => {
     game = new Chess(); history = []; cursor = 0;
-    startingFen = START_FEN;
-    isVariant960 = false;
     previousFen = game.fen();
     document.getElementById('pgnInput').value = '';
     document.getElementById('fenInput').value = '';
@@ -2691,7 +2261,6 @@ window.addEventListener('chessjs-ready', () => {
       ['c4','e5','Nc3','Nf6','Nf3','Nc6'],
       ['Nf3','d5','g3','Nf6','Bg2','e6']
     ];
-    if (isVariant960) return false;   // skip theory for Chess960
     for (const line of BOOK) {
       if (moveIndex > line.length) continue;
       let matches = true;
@@ -2704,7 +2273,7 @@ window.addEventListener('chessjs-ready', () => {
   }
 
   function isForced(index) {
-    const fenBefore = index === 1 ? startingFen : history[index - 2].fen;
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     let c;
     try { c = new Chess(fenBefore); } catch (e) { return false; }
     return c.moves().length === 1;
@@ -2713,7 +2282,7 @@ window.addEventListener('chessjs-ready', () => {
   function isSacrifice(index) {
     const mv = history[index - 1];
     if (!mv) return false;
-    const fenBefore = index === 1 ? startingFen : history[index - 2].fen;
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
     let chessAfter, chessBefore;
     try {
@@ -2872,7 +2441,7 @@ window.addEventListener('chessjs-ready', () => {
   async function classifyMove(index, depth = 14) {
     const mv = history[index - 1];
     if (!mv) return;
-    const fenBefore = index === 1 ? startingFen : history[index - 2].fen;
+    const fenBefore = index === 1 ? START_FEN : history[index - 2].fen;
     const fenAfter  = mv.fen;
     const moverIsWhite = fenBefore.split(' ')[1] === 'w';
     mv.moverIsWhite = moverIsWhite;
@@ -3037,7 +2606,6 @@ window.addEventListener('chessjs-ready', () => {
       document.getElementById('analysisSub').textContent = `${i} / ${history.length}`;
       document.getElementById('analysisProgressBar').style.width = ((i / history.length) * 100) + '%';
       await classifyMove(i, depth);
-      if (history[i - 1]) history[i - 1].pending = false;
       await new Promise(r => setTimeout(r, 0));
     }
 
@@ -3059,7 +2627,7 @@ window.addEventListener('chessjs-ready', () => {
     const output = document.getElementById('aiOutput');
     if (cursor === 0) { output.innerHTML = '<em>Load a game first.</em>'; return; }
     const mv = history[cursor - 1];
-    const fenBefore = cursor === 1 ? startingFen : history[cursor - 2].fen;
+    const fenBefore = cursor === 1 ? START_FEN : history[cursor - 2].fen;
     const fenAfter  = mv.fen;
     output.innerHTML = '<em>Thinking…</em>';
 
@@ -3106,127 +2674,6 @@ Explain in plain English why this move was classified as ${mv.cls || 'unclassifi
 
   renderPlayerStrips({});
   renderAll({ skipAnimation: true });
-  attachClickHandlers();
-
- // ---------- Click-to-move ----------
-  // Attach a click handler to every square on the board. This works
-  // alongside chessboard.js's drag-and-drop — clicking and dragging are
-  // two independent input paths.
-  function attachClickHandlers() {
-    // chessboard.js re-renders the board on every position() call, so we
-    // must re-attach handlers each time. Use a delegate on the board
-    // container to avoid re-querying constantly.
-    const boardWrap = document.querySelector('.board-wrap');
-    if (!boardWrap || boardWrap.dataset.clickBound === '1') return;
-    boardWrap.dataset.clickBound = '1';
-
-    boardWrap.addEventListener('click', (evt) => {
-      // Find the closest ancestor with a data-square attribute
-      const sqEl = evt.target.closest('[data-square]');
-      if (!sqEl) return;
-      const square = sqEl.dataset.square;
-      handleSquareClick(square);
-    });
-  }
-
-  function handleSquareClick(square) {
-    // If a piece is already selected, try to move it to `square`.
-    if (clickSelected) {
-      // Clicking the same square again deselects.
-      if (square === clickSelected) {
-        clearClickSelection();
-        return;
-      }
-
-      // Try the move. chess.js throws if illegal in 1.0.0.
-      try {
-        const move = game.move({ from: clickSelected, to: square, promotion: 'q' });
-
-        // Move succeeded — commit it to history the same way onDrop does.
-        history = history.slice(0, cursor);
-        const index = history.length + 1;
-
-        history.push({
-          san: move.san, fen: game.fen(),
-          uci: move.from + move.to + (move.promotion || ''),
-          cls: null, cpLoss: null, winDrop: null,
-          evalBefore: null, evalAfter: null,
-          evalBeforeWhite: null, evalAfterWhite: null,
-          moverIsWhite: move.color === 'w',
-          pending: true
-        });
-        cursor = history.length;
-
-        clearClickSelection();
-        renderAll();
-        classifySingleMove(index);
-        return;
-      } catch (e) {
-        // Not a legal move. Either the user clicked another of their own
-        // pieces (reselect) or an empty square (deselect).
-        const piece = game.get(square);
-        if (piece && piece.color === game.turn()) {
-          // Reselect the new piece
-          selectClickSquare(square);
-        } else {
-          // Nothing to do — deselect
-          clearClickSelection();
-        }
-        return;
-      }
-    }
-
-    // Nothing selected yet. Try to select the clicked square.
-    const piece = game.get(square);
-    if (!piece) return;                     // empty square, nothing to do
-    if (piece.color !== game.turn()) return; // not your piece
-
-    selectClickSquare(square);
-  }
-
-  function selectClickSquare(square) {
-    clickSelected = square;
-
-    // Ask chess.js where this piece can legally move.
-    const moves = game.moves({ square: square, verbose: true });
-    clickLegalTargets = moves.map(m => m.to);
-
-    // Paint the highlight
-    renderClickHighlights();
-  }
-
-  function clearClickSelection() {
-    clickSelected = null;
-    clickLegalTargets = [];
-    renderClickHighlights();
-  }
-
-  function renderClickHighlights() {
-    // Clear any existing highlights
-    document.querySelectorAll('#board .selected-square').forEach(el => {
-      el.classList.remove('selected-square');
-    });
-    document.querySelectorAll('#board .legal-target').forEach(el => {
-      el.classList.remove('legal-target', 'occupied');
-    });
-
-    if (!clickSelected) return;
-
-    // Selected square outline
-    const selEl = document.querySelector('#board [data-square="' + clickSelected + '"]');
-    if (selEl) selEl.classList.add('selected-square');
-
-    // Legal-target dots
-    for (const target of clickLegalTargets) {
-      const el = document.querySelector('#board [data-square="' + target + '"]');
-      if (!el) continue;
-      el.classList.add('legal-target');
-      // If the target has a piece on it (a capture), draw a ring instead.
-      const tgtPiece = game.get(target);
-      if (tgtPiece) el.classList.add('occupied');
-    }
-  }
-  
   initStockfish();
 
   window.getGame = () => game;
